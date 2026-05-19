@@ -18,7 +18,7 @@ The installer will try to install **Python 3.10+** (via winget) and **Ollama** i
 
 ### Steps
 
-1. Open the **[Releases](https://github.com/forexlord/voice-assistant/releases)** page on GitHub.
+1. Open the **[Releases](https://github.com/forexlord/dora/releases)** page on GitHub.
 2. Download **`Dora-windows.zip`** (or the latest release ZIP).
 3. **Extract** the ZIP to any folder (e.g. `Downloads\Dora`).
 4. Double-click **`Install-Dora.bat`**.
@@ -122,7 +122,7 @@ Install [Python 3.10+](https://www.python.org/downloads/) and check **“Add Pyt
 If you work on the source repo with git:
 
 ```powershell
-git clone https://github.com/forexlord/voice-assistant.git
+git clone https://github.com/forexlord/dora.git
 cd voice-assistant
 .\Install-Dora.bat
 ```
