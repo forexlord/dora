@@ -35,7 +35,11 @@ function Find-PythonExe {
     )
     foreach ($c in $candidates) {
         try {
-            $ver = & $c.Exe @($c.Args + @("-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')") 2>$null
+            $pyArgs = $c.Args + @(
+                "-c",
+                "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))"
+            )
+            $ver = & $c.Exe @pyArgs 2>$null
             if ($LASTEXITCODE -ne 0 -or -not $ver) { continue }
             $parts = $ver.Trim().Split(".")
             $maj = [int]$parts[0]
@@ -43,7 +47,9 @@ function Find-PythonExe {
             if ($maj -gt 3 -or ($maj -eq 3 -and $min -ge 10)) {
                 return @{ Launcher = $c.Exe; VersionArgs = $c.Args }
             }
-        } catch { }
+        } catch {
+            continue
+        }
     }
     return $null
 }
@@ -60,7 +66,7 @@ function Invoke-Python($py, [string[]]$PythonArgs) {
 
 function Set-UserEnv([string]$Name, [string]$Value) {
     [Environment]::SetEnvironmentVariable($Name, $Value, "User")
-    $env:$Name = $Value
+    Set-Item -Path "Env:$Name" -Value $Value
 }
 
 function New-Shortcut($TargetPath, $Arguments, $WorkingDirectory, $ShortcutPath, $Description) {
