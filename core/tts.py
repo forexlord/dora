@@ -38,6 +38,23 @@ class TextToSpeech:
             except OSError:
                 pass
 
+    def speak_async(
+        self,
+        text: str,
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> threading.Thread:
+        """Start speech on a background thread; caller can listen concurrently."""
+        thread = threading.Thread(
+            target=self.speak,
+            args=(text,),
+            kwargs={"cancel_event": cancel_event},
+            name="dora-tts",
+            daemon=True,
+        )
+        thread.start()
+        return thread
+
     def speak(
         self,
         text: str,

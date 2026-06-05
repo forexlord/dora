@@ -1,4 +1,4 @@
-"""Intent parsing for Dora: rules, arithmetic, safety, and Ollama-backed classification."""
+"""Intent parsing for Dora: rules, arithmetic, safety, and local GGUF-backed classification."""
 
 from __future__ import annotations
 

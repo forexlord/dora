@@ -1,4 +1,4 @@
-"""Ollama chat/generate integration for JSON intent resolution and free-form replies."""
+"""Local GGUF inference via bundled llama-server (one installer, no Visual Studio, no Ollama)."""
 
 from __future__ import annotations
 
@@ -6,32 +6,38 @@ import json
 import re
 from typing import Any
 
-try:
-    import ollama
-except ImportError:  # pragma: no cover
-    ollama = None
+from core.llama_server import (
+    chat_completion,
+    last_server_error,
+    start_llama_server,
+)
 
 from .constants import (
     BAD_CLARIFY_SUBSTRINGS,
     DEFAULT_BRIGHTNESS_STEP_PERCENT,
     DEFAULT_VOLUME_STEP_PERCENT,
+    DORA_CAPABILITIES_PROMPT,
     DORA_CREATOR_REPLY,
     REFUSAL_REPLY,
     VALID_CLARIFY_PENDING,
 )
 from .safety import contains_profanity, sanitize_reply_text
 
+_config: dict[str, Any] | None = None
+_model_path: str | None = None
+_port: int = 8765
+_ready: bool = False
 
-def message_content(response: Any) -> str:
-    if isinstance(response, dict):
-        msg = response.get("message")
-    else:
-        msg = response.message
-    if isinstance(msg, dict):
-        raw = msg.get("content", "")
-    else:
-        raw = getattr(msg, "content", "") or ""
-    return (raw or "").strip()
+
+def configure_llm(config: dict[str, Any], model_path: str) -> None:
+    global _config, _model_path, _port
+    _config = config
+    _model_path = model_path
+    _port = int(config.get("llama_server_port", 8765))
+
+
+def last_llama_load_error() -> str | None:
+    return last_server_error()
 
 
 def coerce_json_number(val: Any) -> float | None:
@@ -65,92 +71,65 @@ def parse_resolve_json(content: str) -> dict[str, Any] | None:
         return None
 
 
-class OllamaIntentBackend:
-    """Calls local Ollama for structured intents (JSON) and conversational fallbacks."""
+class GgufIntentBackend:
+    """HTTP client to bundled llama-server for JSON intents and chat replies."""
 
     def __init__(
         self,
-        model: str = "phi",
+        model_path: str,
+        config: dict[str, Any],
         *,
-        chat_model: str | None = None,
         num_predict_resolve: int = 120,
         num_predict_chat: int = 128,
         temperature_resolve: float = 0.0,
-        num_ctx: int | None = None,
+        n_ctx: int | None = None,
+        n_threads: int = 0,
     ) -> None:
-        self.model = model.strip() or "phi"
-        chat = (chat_model or "").strip()
-        self._chat_model = chat if chat and chat != self.model else self.model
+        self._model_path = str(model_path).strip()
+        merged = dict(config)
+        if n_ctx is not None and int(n_ctx) > 0:
+            merged["llm_n_ctx"] = int(n_ctx)
+        if n_threads > 0:
+            merged["llm_n_threads"] = int(n_threads)
+        self._config = merged
         self._num_predict_resolve = max(24, int(num_predict_resolve))
         self._num_predict_chat = max(32, min(int(num_predict_chat), 160))
         self._temperature_resolve = float(temperature_resolve)
-        self._num_ctx = int(num_ctx) if num_ctx is not None else None
+        configure_llm(self._config, self._model_path)
 
-    def _runtime_options(
-        self, *, num_predict: int, temperature: float
-    ) -> dict[str, Any]:
-        opts: dict[str, Any] = {
-            "temperature": temperature,
-            "num_predict": int(num_predict),
-        }
-        if self._num_ctx is not None:
-            opts["num_ctx"] = self._num_ctx
-        return opts
+    def _ensure_running(self) -> bool:
+        global _ready
+        if _ready and start_llama_server(self._config, self._model_path, port=_port):
+            return True
+        ok = start_llama_server(self._config, self._model_path, port=_port)
+        _ready = ok
+        return ok
 
     def available(self) -> bool:
-        return ollama is not None
+        from pathlib import Path
+
+        return Path(self._model_path).expanduser().is_file()
 
     def warmup(self) -> bool:
-        if ollama is None:
+        if not self._ensure_running():
             return False
-        ok = False
         try:
-            ollama.generate(
-                model=self._chat_model,
-                prompt="User: ping\nDora: ok",
-                keep_alive="30m",
-                options=self._runtime_options(num_predict=8, temperature=0.0),
+            out = chat_completion(
+                _port,
+                [
+                    {
+                        "role": "system",
+                        "content": 'Reply JSON only: {"type":"chat","reply":"ok"}',
+                    },
+                    {"role": "user", "content": "ping"},
+                ],
+                max_tokens=16,
+                temperature=0.0,
+                json_object=True,
             )
-            ok = True
+            return bool(out)
         except Exception:
-            pass
-        if self._chat_model != self.model:
-            try:
-                ollama.chat(
-                    model=self.model,
-                    format="json",
-                    keep_alive="30m",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": 'Reply JSON only: {"type":"chat","reply":"ok"}',
-                        },
-                        {"role": "user", "content": "ping"},
-                    ],
-                    options=self._runtime_options(num_predict=16, temperature=0.0),
-                )
-                ok = True
-            except Exception:
-                pass
-        elif not ok:
-            try:
-                ollama.chat(
-                    model=self.model,
-                    format="json",
-                    keep_alive="30m",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": 'Reply JSON only: {"type":"chat","reply":"ok"}',
-                        },
-                        {"role": "user", "content": "ping"},
-                    ],
-                    options=self._runtime_options(num_predict=16, temperature=0.0),
-                )
-                ok = True
-            except Exception:
-                pass
-        return ok
+            return False
 
     def _resolve_system_prompt(self) -> str:
         step_v = int(DEFAULT_VOLUME_STEP_PERCENT)
@@ -159,6 +138,7 @@ class OllamaIntentBackend:
             "You are Dora, a Windows voice assistant created by Recovery Eyo "
             "(software engineer, Nigeria). Never say Microsoft, OpenAI, or another "
             f"company created you; for creator questions use: {DORA_CREATOR_REPLY}\n"
+            f"{DORA_CAPABILITIES_PROMPT}\n"
             "Input is speech-to-text: often incomplete or wrong.\n"
             "To report current volume or battery, use volume_status or battery_status "
             "types — never invent a number.\n"
@@ -198,6 +178,7 @@ class OllamaIntentBackend:
             'Definitions and general knowledge (physics, antimatter, "what does X mean", explain) '
             'without needing live internet: {"type":"chat","reply":"<2-4 short clear sentences>"}\n'
             'Small talk / thanks / hello: {"type":"chat","reply":"<1-2 short sentences>"}\n'
+            'If user asks what you can do or how you help: {"type":"chat","reply":"<short honest list of real PC controls only>"}\n'
             "If the user uses slurs, sexual content, hate, asks for illegal or dangerous how-to, "
             "self-harm instructions, malware, or personalized medical/legal diagnosis: "
             '{"type":"chat","reply":"I can\'t help with that."} (exactly that reply text)\n'
@@ -206,23 +187,20 @@ class OllamaIntentBackend:
         )
 
     def resolve(self, user_content: str) -> dict[str, Any] | None:
-        if ollama is None:
+        if not self._ensure_running():
             return None
         try:
-            response = ollama.chat(
-                model=self.model,
-                format="json",
-                keep_alive="30m",
-                messages=[
+            raw = chat_completion(
+                _port,
+                [
                     {"role": "system", "content": self._resolve_system_prompt()},
                     {"role": "user", "content": user_content},
                 ],
-                options=self._runtime_options(
-                    num_predict=self._num_predict_resolve,
-                    temperature=self._temperature_resolve,
-                ),
+                max_tokens=self._num_predict_resolve,
+                temperature=self._temperature_resolve,
+                json_object=True,
             )
-            parsed = parse_resolve_json(message_content(response))
+            parsed = parse_resolve_json(raw or "")
             if not isinstance(parsed, dict):
                 return None
             return self._normalize_parsed_intent(parsed, user_content)
@@ -312,34 +290,33 @@ class OllamaIntentBackend:
         return None
 
     def generate_reply(self, text: str) -> str | None:
-        """Fast spoken reply (``ollama generate`` — same style as ``ollama run`` in PowerShell)."""
-        if ollama is None:
+        if not self._ensure_running():
             return None
-        block = (
+        system = (
             "You are Dora, a friendly Windows voice assistant created by Recovery Eyo, "
             "a software engineer from Nigeria (never say Microsoft or another company "
             f"made you; creator fact: {DORA_CREATOR_REPLY}). "
+            f"{DORA_CAPABILITIES_PROMPT} "
             "Reply in 1-3 short spoken sentences. Be warm and direct.\n"
+            "Speak only your answer — never write User:, Dora:, or role-play a transcript.\n"
             "Do not invent PC volume, battery, or brightness numbers — the app reads those separately.\n"
+            "Never mention weather, reminders, alarms, email, or web search.\n"
             "Math: state the correct number. Other facts: brief and accurate.\n"
             "Refuse only serious harm (illegal acts, self-harm, hate, explicit sexual content) "
-            "with exactly: I can't help with that.\n"
-            f"User: {text}\nDora:"
+            "with exactly: I can't help with that."
         )
         try:
-            out = ollama.generate(
-                model=self._chat_model,
-                prompt=block,
-                keep_alive="30m",
-                options=self._runtime_options(
-                    num_predict=self._num_predict_chat,
-                    temperature=0.25,
-                ),
+            raw = chat_completion(
+                _port,
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": text},
+                ],
+                max_tokens=self._num_predict_chat,
+                temperature=0.25,
             )
-            raw = getattr(out, "response", None) or (
-                out.get("response", "") if isinstance(out, dict) else ""
-            )
-            raw = raw or ""
+            if not raw:
+                return None
             reply = raw.strip().split("\n\n")[0].strip()
             if len(reply) < 2:
                 return None
@@ -348,9 +325,11 @@ class OllamaIntentBackend:
             return None
 
     def chat_reply(self, text: str) -> str | None:
-        if ollama is None:
-            return None
         norm = " ".join(text.lower().strip().split())
         if contains_profanity(norm):
             return REFUSAL_REPLY
         return self.generate_reply(text)
+
+
+# Backward-compatible alias
+LlamaCppIntentBackend = GgufIntentBackend

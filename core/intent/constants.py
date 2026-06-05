@@ -33,6 +33,14 @@ DORA_CREATOR_MORE_REPLY = (
 
 DORA_NAME_REPLY = "My name is Dora. I'm a Windows voice assistant on your PC."
 
+# Shorter block embedded in LLM system prompts so chat replies stay honest.
+DORA_CAPABILITIES_PROMPT = (
+    "You ONLY control this Windows PC: open/close apps; volume and mute; brightness; "
+    "read volume/battery levels; Wi-Fi and hotspot toggle; shutdown with user confirmation; "
+    "math and offline Q&A. You CANNOT: weather, reminders, alarms, email, texts, web search, "
+    "smart home, or cloud services. If asked what you can do, list only the real abilities above."
+)
+
 # Substrings in model-generated clarify prompts we replace with useful questions.
 BAD_CLARIFY_SUBSTRINGS: tuple[str, ...] = (
     "current volume",

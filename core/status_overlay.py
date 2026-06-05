@@ -107,8 +107,14 @@ class StatusOverlay:
         self._q.put(_SHOW_WINDOW)
 
     def shutdown(self) -> None:
-        if self._started:
-            self._q.put(self._SHUTDOWN)
+        if not self._started:
+            return
+        self._q.put(self._SHUTDOWN)
+        thread = self._thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=3.0)
+        self._thread = None
+        self._started = False
 
     @property
     def active(self) -> bool:

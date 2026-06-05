@@ -12,6 +12,7 @@ from .constants import (
     FORCE_CLOSE_WORDS,
     OPEN_WORDS,
     SHUTDOWN_WORDS,
+    SHELL_LIKE_WORDS,
 )
 
 
@@ -195,6 +196,35 @@ _CREATOR_MORE_RE = re.compile(
 )
 
 
+_CAPABILITIES_RE = re.compile(
+    r"\b("
+    r"what can you do|what can u do|what do you do|what are you able to do|"
+    r"what are you capable of|what are your features|what can you help with|"
+    r"how can you help(?: me)?|what do you support|list your commands|"
+    r"what things can you do|what are you for"
+    r")\b",
+    re.IGNORECASE,
+)
+# STT often mis-hears "what" as "walk", "want", "wat", etc.
+_CAPABILITIES_LOOSE_RE = re.compile(
+    r"(?:\b(?:what|walk|want|wat|whats|what's)\s+)?(?:can|could)\s+(?:you|u)\s+do\b|"
+    r"\bwhat\s+(?:are\s+)?(?:your\s+)?(?:features|capabilities)\b|"
+    r"\bhow\s+can\s+you\s+help\b|"
+    r"\bwhat\s+do\s+you\s+do\b",
+    re.IGNORECASE,
+)
+
+
+def is_capabilities_question(normalized: str) -> bool:
+    """User is asking what Dora can do (including garbled wake/STT)."""
+    n = normalized.strip()
+    if not n or _ACTION_VERB_RE.search(n):
+        return False
+    if n in SHELL_LIKE_WORDS:
+        return True
+    return bool(_CAPABILITIES_RE.search(n) or _CAPABILITIES_LOOSE_RE.search(n))
+
+
 def parse_identity_intent(normalized: str) -> dict[str, Any] | None:
     """Fixed facts about Dora — avoid LLM inventing Microsoft etc."""
     from .constants import DORA_CREATOR_MORE_REPLY, DORA_CREATOR_REPLY, DORA_NAME_REPLY
@@ -276,7 +306,7 @@ _QUICK_DISMISS_PHRASES: tuple[str, ...] = (
 
 def parse_quick_chat_intent(normalized: str) -> dict[str, Any] | None:
     """
-    Fast, local intents for short corrections / dismissals so we skip Ollama.
+    Fast, local intents for short corrections / dismissals so we skip the LLM.
 
     Only matches when there is no obvious action verb (open/close/volume/…),
     so phrasing like \"no open chrome\" still falls through to rules or the LLM.

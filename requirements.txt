@@ -1,6 +1,5 @@
 # Dora — install with: pip install -e .
 comtypes>=1.4.0
-ollama>=0.3.0
 pycaw>=20240210
 rich>=13.0.0
 sounddevice>=0.4.0

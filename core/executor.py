@@ -6,6 +6,13 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from core.app_close import (
+    build_process_patterns,
+    build_window_title_needles,
+    close_by_window_titles,
+    close_uwp_by_name,
+    kill_by_process_patterns,
+)
 from core.discovery import build_runtime_launch_index, find_app_executable, normalize_app_name
 from core.permissions import PermissionStore
 from core.win_subprocess import popen_no_console, run_no_console
@@ -260,7 +267,7 @@ class CommandExecutor:
 
         self._launch_target(app_path)
         opened_as = display_label or app_key
-        return True, f"Opened {opened_as}"
+        return True, f"Okay, I opened {opened_as}."
 
     def close_app(
         self,
@@ -296,58 +303,32 @@ class CommandExecutor:
                 return False, f"Close canceled for {app_key}"
 
         target = index.get(app_key, "")
+        pretty = self._pretty_app_label(app_key)
         if app_key in {"file explorer", "explorer", "windows explorer"}:
             if self._close_file_explorer_windows():
-                return True, "Closed file explorer windows"
+                return True, "Okay, I closed File Explorer."
 
-        patterns: list[str] = [app_key.replace(" ", "")]
         if target.startswith("uwp:"):
-            patterns.append(app_key)
-        elif target:
-            path = Path(target)
-            if path.suffix.lower() in {".exe", ".lnk"}:
-                patterns.append(path.stem)
+            if close_uwp_by_name(app_key, force=force):
+                return True, f"Okay, I closed {pretty}."
+            needles = build_window_title_needles(app_key, pretty)
+            if close_by_window_titles(needles, force=force):
+                return True, f"Okay, I closed {pretty}."
 
-        for raw in patterns:
-            proc = raw.strip().replace('"', "")
-            if not proc:
-                continue
-            exe_name = proc if proc.lower().endswith(".exe") else f"{proc}.exe"
-            args = ["taskkill", "/IM", exe_name, "/T"]
-            if force:
-                args.insert(1, "/F")
-            result = run_no_console(
-                args,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode == 0:
-                return True, f"Closed {app_key}"
+        patterns = build_process_patterns(app_key, target)
+        if kill_by_process_patterns(patterns, force=force):
+            return True, f"Okay, I closed {pretty}."
 
-        for raw in patterns:
-            pattern = raw.replace(" ", "*")
-            stop = "Stop-Process -Force" if force else "Stop-Process"
-            ps_cmd = (
-                "$procs = Get-Process | Where-Object { $_.ProcessName -like "
-                f"'*{pattern}*' }}; "
-                f"if ($procs) {{ $procs | {stop}; exit 0 }} else {{ exit 1 }}"
-            )
-            result = run_no_console(
-                ["powershell", "-NoProfile", "-Command", ps_cmd],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode == 0:
-                return True, f"Closed {app_key}"
+        needles = build_window_title_needles(app_key, pretty)
+        if close_by_window_titles(needles, force=force):
+            return True, f"Okay, I closed {pretty}."
 
         hint = (
             f" Say force close {app_key} if you need to end it."
             if not force
             else ""
         )
-        return False, f"I couldn't find a running process for {app_key}.{hint}"
+        return False, f"I couldn't find a running process for {pretty}.{hint}"
 
     def shutdown(
         self,

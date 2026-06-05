@@ -1,3 +1,4 @@
+README.md
 pyproject.toml
 core/__init__.py
 core/application.py
@@ -17,7 +18,7 @@ core/intent/__init__.py
 core/intent/arithmetic.py
 core/intent/constants.py
 core/intent/conversational.py
-core/intent/ollama_client.py
+core/intent/llm_client.py
 core/intent/parser.py
 core/intent/rules.py
 core/intent/safety.py

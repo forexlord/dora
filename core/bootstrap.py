@@ -1,34 +1,41 @@
 from __future__ import annotations
 
 import json
-import shutil
 import zipfile
 from pathlib import Path
 from urllib.request import urlopen
 
-from core.win_subprocess import run_no_console
-
+from core.llama_runtime import gguf_header_valid
+from core.llama_server import ensure_llama_tools  # noqa: F401 — used by install/setup
 
 DEFAULT_VOSK_URL = (
     "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
 )
 
+DEFAULT_LLM_URL = (
+    "https://huggingface.co/bartowski/Phi-3-mini-4k-instruct-GGUF/resolve/main/"
+    "Phi-3-mini-4k-instruct-Q4_K_M.gguf"
+)
+DEFAULT_LLM_PATH = "models/Phi-3-mini-4k-instruct-Q4_K_M.gguf"
+_MIN_GGUF_BYTES = 50_000_000
 
-def _resolve_ollama_bin() -> str | None:
-    binary = shutil.which("ollama")
-    if binary:
-        return binary
-    local_app = Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe"
-    if local_app.exists():
-        return str(local_app)
-    program_files = Path("C:/Program Files/Ollama/ollama.exe")
-    if program_files.exists():
-        return str(program_files)
-    return None
+
+def llm_model_path_from_config(config: dict) -> str:
+    path = str(config.get("llm_model_path", "")).strip()
+    if path:
+        return path
+    return DEFAULT_LLM_PATH
+
+
+def config_use_llm_fallback(config: dict) -> bool:
+    if "use_llm_fallback" in config:
+        return bool(config["use_llm_fallback"])
+    return bool(config.get("use_ollama_fallback", True))
 
 
 def ensure_runtime_files() -> None:
     Path("apps").mkdir(parents=True, exist_ok=True)
+    Path("models").mkdir(parents=True, exist_ok=True)
     defaults: dict[str, str] = {
         "permissions.json": "{}",
     }
@@ -55,6 +62,14 @@ def _find_first_model_dir(root: Path) -> Path | None:
         if child.is_dir() and _looks_like_vosk_model(child):
             return child
     return None
+
+
+def _valid_gguf_file(path: Path) -> bool:
+    return (
+        path.is_file()
+        and path.stat().st_size >= _MIN_GGUF_BYTES
+        and gguf_header_valid(path)
+    )
 
 
 def ensure_vosk_model(config: dict) -> tuple[bool, str, str | None]:
@@ -101,72 +116,66 @@ def ensure_vosk_model(config: dict) -> tuple[bool, str, str | None]:
     return True, f"Downloaded and prepared Vosk model at: {discovered}", discovered.as_posix()
 
 
-def ensure_ollama_runtime(config: dict) -> tuple[bool, str]:
-    ollama_bin = _resolve_ollama_bin()
-    if ollama_bin:
-        return True, f"Ollama detected at: {ollama_bin}"
+def ensure_llm_model(config: dict) -> tuple[bool, str]:
+    model_path = Path(llm_model_path_from_config(config))
+    if model_path.is_file() and not gguf_header_valid(model_path):
+        try:
+            model_path.unlink(missing_ok=True)
+        except OSError:
+            return False, (
+                f"Language model at {model_path} is not a valid GGUF file. "
+                "Delete it manually and re-run setup."
+            )
+    if _valid_gguf_file(model_path):
+        return True, f"Language model ready: {model_path}"
 
-    if not bool(config.get("auto_install_ollama", True)):
-        return False, "Ollama not found and auto-install is disabled."
-
-    install_cmd = "irm https://ollama.com/install.ps1 | iex"
-    try:
-        result = run_no_console(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", install_cmd],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=600,
+    auto = config.get("auto_download_llm_model")
+    if auto is None:
+        auto = config.get("auto_pull_ollama_model", True)
+    if not bool(auto):
+        return (
+            False,
+            f"GGUF model not found at {model_path} and auto_download_llm_model is disabled.",
         )
-    except Exception as exc:
-        return False, f"Failed to run Ollama installer: {exc}"
 
-    if result.returncode != 0:
-        return False, f"Ollama installer returned code {result.returncode}."
+    model_url = str(config.get("llm_model_url", DEFAULT_LLM_URL)).strip()
+    if not model_url:
+        return False, "No llm_model_url configured for download."
 
-    ollama_bin = _resolve_ollama_bin()
-    if not ollama_bin:
-        return False, "Installer finished but `ollama` is not available in PATH yet."
-    return True, f"Ollama installed at: {ollama_bin}"
-
-
-def ensure_ollama_model(config: dict) -> tuple[bool, str]:
-    model_name = str(config.get("ollama_model", "phi")).strip()
-    if not model_name:
-        return False, "No Ollama model configured."
-
-    if not bool(config.get("auto_pull_ollama_model", True)):
-        return True, f"Auto model pull disabled. Using configured model: {model_name}"
-
-    ollama_bin = _resolve_ollama_bin()
-    if not ollama_bin:
-        return False, "Ollama binary not found while checking models."
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = model_path.with_suffix(model_path.suffix + ".part")
 
     try:
-        list_result = run_no_console(
-            [ollama_bin, "list"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
+        with urlopen(model_url, timeout=120) as response:  # noqa: S310
+            total = int(response.headers.get("Content-Length", 0) or 0)
+            downloaded = 0
+            last_mb = 0
+            with tmp_path.open("wb") as output:
+                while True:
+                    chunk = response.read(1024 * 512)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    if total > 0:
+                        mb = downloaded // (1024 * 1024)
+                        if mb >= last_mb + 50:
+                            pct = min(100, int(100 * downloaded / total))
+                            print(
+                                f"  … downloaded {mb} MB ({pct}%)",
+                                flush=True,
+                            )
+                            last_mb = mb
+        tmp_path.replace(model_path)
     except Exception as exc:
-        return False, f"Failed to query Ollama models: {exc}"
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        return False, f"Failed to download language model: {exc}"
 
-    if list_result.returncode == 0 and model_name in list_result.stdout:
-        return True, f"Ollama model already present: {model_name}"
+    if not _valid_gguf_file(model_path):
+        return False, f"Download finished but file looks invalid: {model_path}"
 
-    pull_result = run_no_console(
-        [ollama_bin, "pull", model_name],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=1200,
-    )
-    if pull_result.returncode != 0:
-        return False, f"Failed to pull Ollama model: {model_name}"
-
-    return True, f"Ollama model ready: {model_name}"
+    return True, f"Downloaded language model to: {model_path}"
 
 
 def persist_config(config: dict, path: str = "config.json") -> None:
