@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dora"
-version = "0.1.0"
+version = "0.2.0"
 description = "Dora — Windows voice assistant (faster-whisper STT, bundled llama.cpp, local GGUF)"
 requires-python = ">=3.10"
 dependencies = [

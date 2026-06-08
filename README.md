@@ -195,9 +195,20 @@ python scripts\first_run_setup.py
 dora
 ```
 
-### Publishing a release ZIP (maintainers)
+### Publishing a release (maintainers)
 
-Create a ZIP of the repo **without** `venv/`, `models/`, `.git/`, then attach to GitHub Releases as `Dora-windows.zip`. Users only need **`Install-Dora.bat`** + **`install.ps1`** + project files inside the ZIP.
+1. Bump `version` in `pyproject.toml` (e.g. `0.2.0`).
+2. Commit and push to `main`.
+3. Tag and push — CI builds `Dora-windows.zip` and publishes the release automatically:
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The [Releases](https://github.com/forexlord/dora/releases) page will get a new entry with **`Dora-windows.zip`** attached. Users run **`Install-Dora.bat`** inside the ZIP (no git required).
+
+Manual ZIP (optional): `powershell -ExecutionPolicy Bypass -File scripts/build-release-zip.ps1`
 
 ---
 
