@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from core.session import heard_is_confirmation
+
 from .constants import (
     CLOSE_WORDS,
     CONFIRM_WORDS,
@@ -92,7 +94,7 @@ def parse_rule_intent(normalized: str) -> dict[str, Any] | None:
         if normalized == word or normalized.startswith(word + " ") or f" {word} " in normalized:
             return {"type": "shutdown"}
 
-    if normalized in CONFIRM_WORDS:
+    if normalized in CONFIRM_WORDS or heard_is_confirmation(normalized):
         return {"type": "confirm"}
 
     return None

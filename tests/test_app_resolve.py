@@ -27,6 +27,11 @@ def test_apply_app_alias_file_manager() -> None:
     assert apply_app_alias("file manager") == "file explorer"
 
 
+def test_apply_app_alias_brave_mishearings() -> None:
+    assert apply_app_alias("breathe") == "brave"
+    assert apply_app_alias("brief") == "brave"
+
+
 def test_was_up_alias_maps_to_whatsapp() -> None:
     assert apply_app_alias("was up") == "whatsapp"
 

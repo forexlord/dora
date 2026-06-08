@@ -13,7 +13,9 @@ FORCE_CLOSE_WORDS = frozenset(
 SHUTDOWN_WORDS = frozenset(
     {"shutdown", "shut down", "eteindre", "arrêter", "arreter", "apagar"}
 )
-CONFIRM_WORDS = frozenset({"yes", "y", "oui", "si"})
+CONFIRM_WORDS = frozenset(
+    {"yes", "y", "yeah", "yep", "sure", "ok", "okay", "oui", "si", "confirm"}
+)
 SHELL_LIKE_WORDS = frozenset({"clear", "cls", "exit", "quit", "help"})
 
 DEFAULT_VOLUME_STEP_PERCENT = 10.0

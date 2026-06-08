@@ -15,6 +15,7 @@ from core.app_close import (
 from core.app_resolve import apply_app_alias, resolve_app_key
 from core.discovery import build_runtime_launch_index, find_app_executable, normalize_app_name
 from core.permissions import PermissionStore
+from core.session import heard_is_confirmation
 from core.win_subprocess import popen_no_console, run_no_console
 
 
@@ -41,7 +42,7 @@ class CommandExecutor:
         if confirm_fn is not None:
             return bool(confirm_fn(prompt))
         answer = input(f"{prompt} (yes/no): ").strip().lower()
-        return answer in {"yes", "y", "confirm"}
+        return heard_is_confirmation(answer)
 
     @staticmethod
     def _pretty_app_label(key: str) -> str:
@@ -66,11 +67,7 @@ class CommandExecutor:
     ) -> str:
         label = self._pretty_app_label(suggested_key)
         heard = (heard_display or heard_key).strip() or heard_key
-        verb = "open" if for_open else "close"
-        return (
-            f"Did you mean {label}? You said: \"{heard}\". "
-            f'Say yes or confirm to {verb} {label}.'
-        )
+        return f'Did you mean {label}? You said: "{heard}".'
 
     def _resolve_app_key(self, app_key: str, candidates: dict[str, str]) -> tuple[str | None, float]:
         return resolve_app_key(app_key, candidates)
@@ -190,8 +187,7 @@ class CommandExecutor:
             ):
                 return (
                     False,
-                    f"Canceled — not opening {self._pretty_app_label(resolved_key)}. "
-                    f'You said: "{display_label or heard_key}".',
+                    f"Canceled — not opening {self._pretty_app_label(resolved_key)}.",
                 )
 
         app_path = index.get(app_key)
@@ -222,7 +218,9 @@ class CommandExecutor:
             self.permission_store.set_allowed(app_key, True)
 
         if not self.permission_store.is_allowed(app_key):
-            if not self._confirm(f"Allow access to {app_key}?", confirm_fn):
+            if not self._confirm(
+                f"Allow {self._pretty_app_label(app_key)}?", confirm_fn
+            ):
                 self.permission_store.set_allowed(app_key, False)
                 return False, f"Permission denied for {app_key}"
             self.permission_store.set_allowed(app_key, True)
@@ -261,8 +259,7 @@ class CommandExecutor:
             ):
                 return (
                     False,
-                    f"Canceled — not closing {self._pretty_app_label(resolved_key)}. "
-                    f'You said: "{display_label or heard_key}".',
+                    f"Canceled — not closing {self._pretty_app_label(resolved_key)}.",
                 )
 
         if force:

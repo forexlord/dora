@@ -20,6 +20,11 @@ APP_ALIASES: dict[str, str] = {
     "what's app": "whatsapp",
     "whatsup": "whatsapp",
     "watsapp": "whatsapp",
+    # Brave browser — common Whisper mishearings
+    "breathe": "brave",
+    "breath": "brave",
+    "brief": "brave",
+    "brave browser": "brave",
 }
 
 _SHARED_SUFFIXES = frozenset({"manager", "app", "application", "program", "tool"})

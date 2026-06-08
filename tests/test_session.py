@@ -1,8 +1,14 @@
+from pathlib import Path
+
+from core.executor import CommandExecutor
+from core.permissions import PermissionStore
 from core.session import (
     SessionState,
     build_chat_followup_context,
     clear_chat_context,
     heard_is_confirmation,
+    heard_is_denial,
+    heard_is_likely_prompt_echo,
     remember_chat_turn,
 )
 
@@ -31,7 +37,37 @@ def test_chat_memory_trim() -> None:
 def test_heard_is_confirmation() -> None:
     assert heard_is_confirmation("yes")
     assert heard_is_confirmation("yeah please")
+    assert heard_is_confirmation("go ahead")
+    assert heard_is_confirmation("sure thing")
+    assert heard_is_confirmation("okay open it")
     assert not heard_is_confirmation("no")
+    assert not heard_is_confirmation("no thanks")
+
+
+def test_heard_is_denial() -> None:
+    assert heard_is_denial("no")
+    assert heard_is_denial("don't do that")
+    assert not heard_is_denial("yes")
+
+
+def test_heard_is_likely_prompt_echo() -> None:
+    prompt = 'Did you mean Google Chrome? You said: "cocoa chrome".'
+    assert heard_is_likely_prompt_echo(
+        "did you mean google chrome you said cocoa chrome", prompt
+    )
+    assert not heard_is_likely_prompt_echo("yes", prompt)
+
+
+def test_disambiguation_prompt_is_short(tmp_path: Path) -> None:
+    executor = CommandExecutor(PermissionStore(str(tmp_path / "permissions.json")))
+    prompt = executor._disambiguation_prompt(
+        suggested_key="google chrome",
+        heard_display="cocoa chrome",
+        heard_key="cocoa chrome",
+        for_open=True,
+    )
+    assert prompt == 'Did you mean Google Chrome? You said: "cocoa chrome".'
+    assert "say yes" not in prompt.lower()
 
 
 def test_clear_chat_context() -> None:

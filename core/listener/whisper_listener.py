@@ -139,6 +139,7 @@ class WhisperVoiceListener:
         on_speech_pause: Callable[[], None] | None = None,
         speech_pause_to_processing_sec: float = 0.55,
         cancel_event: threading.Event | None = None,
+        on_voice_start: Callable[[], None] | None = None,
     ) -> str:
         audio_queue: queue.Queue[bytes] = queue.Queue()
         buffer = bytearray()
@@ -158,6 +159,8 @@ class WhisperVoiceListener:
             audio_queue.put(raw)
             preroll.push(raw)
             if pcm16le_rms(raw) >= idle_rms_threshold:
+                if not saw_voice and on_voice_start is not None:
+                    on_voice_start()
                 last_voice_mono = time.monotonic()
                 saw_voice = True
                 pause_sent = False

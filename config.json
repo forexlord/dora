@@ -17,7 +17,7 @@
   "whisper_end_silence_sec": 0.6,
   "whisper_max_utterance_sec": 12,
   "whisper_idle_rms_threshold": 380,
-  "whisper_initial_prompt": "Dora, hey Dora. Open Chrome. Open WhatsApp. Mute. Volume up. What is my battery.",
+  "whisper_initial_prompt": "Dora, hey Dora, doora, adora. Wake word Dora. Open Chrome. Open Brave. Open WhatsApp. Mute. Volume up. What is my battery.",
   "show_status_overlay": true,
   "show_heard_transcript": true,
   "wake_word_enabled": true,

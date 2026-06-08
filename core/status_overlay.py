@@ -26,7 +26,7 @@ _DEFAULT_SUBS: dict[str, str] = {
     "listening": "Speak clearly — I'm ready.",
     "thinking": "Hang on — processing your words…",
     "speaking": "You'll hear this in a moment.",
-    "confirm": "Say yes or confirm out loud.",
+    "confirm": "Yes, sure, or go ahead — anytime.",
     "session_idle": "Say your wake phrase when you need me again.",
     "text_mode": "Use the terminal window below.",
 }

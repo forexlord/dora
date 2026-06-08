@@ -7,8 +7,14 @@ from typing import TYPE_CHECKING
 
 from core import console_ui
 from core.intent.rules import is_session_end_phrase
-from core.session import CONFIRM_HEARD, SESSION_END_TTS, clear_chat_context, heard_is_confirmation
-from core.wake_config import normalize_wake_hearing
+from core.session import (
+    SESSION_END_TTS,
+    clear_chat_context,
+    heard_is_confirmation,
+    heard_is_denial,
+    heard_is_likely_prompt_echo,
+)
+from core.wake_config import match_wake_utterance, preprocess_wake_hearing
 
 if TYPE_CHECKING:
     from core.session import SessionState
@@ -17,7 +23,7 @@ if TYPE_CHECKING:
 class InputMixin:
     """Mixin methods expect a host implementing :class:`~core.assistant.protocol.AssistantHost`."""
     def _normalize_wake_hearing(self, normalized: str) -> str:
-        return normalize_wake_hearing(
+        return preprocess_wake_hearing(
             normalized, self._wake_phrases, self._wake_prefix_alts
         )
 
@@ -88,29 +94,26 @@ class InputMixin:
         normalized_text: str,
         state: SessionState,
     ) -> str | None:
-        nt = self._normalize_wake_hearing(normalized_text)
-        phrases = self._wake_phrases
+        wake_match = match_wake_utterance(
+            normalized_text, self._wake_phrases, self._wake_prefix_alts
+        )
 
         if time.time() > state.wake_armed_until:
-            for phrase in phrases:
-                if nt == phrase:
-                    self._on_wake_only(state)
-                    return None
-                prefix = phrase + " "
-                if nt.startswith(prefix):
-                    tail = nt[len(prefix) :].strip()
-                    if not tail:
-                        self._on_wake_only(state)
-                        return None
-                    self._overlay_user_hidden = False
-                    self._overlay.show()
-                    state.wake_armed_until = time.time() + self._voice_processing_grace_sec
-                    return tail
-            return None
-        if time.time() <= state.wake_armed_until:
-            if any(nt == p for p in phrases):
+            if wake_match is None:
+                return None
+            if not wake_match.command_tail:
                 self._on_wake_only(state)
                 return None
+            self._overlay_user_hidden = False
+            self._overlay.show()
+            state.wake_armed_until = time.time() + self._voice_processing_grace_sec
+            return wake_match.command_tail
+        if time.time() <= state.wake_armed_until:
+            if wake_match is not None and not wake_match.command_tail:
+                self._on_wake_only(state)
+                return None
+            if wake_match is not None and wake_match.command_tail:
+                return wake_match.command_tail
         if is_session_end_phrase(normalized_text):
             console_ui.emit_reply(SESSION_END_TTS)
             state.wake_armed_until = 0.0
@@ -130,29 +133,54 @@ class InputMixin:
 
     def _confirm_action(self, prompt: str) -> bool:
         if self._listener is None:
-            answer = input(f"{prompt} (yes/confirm): ").strip().lower()
-            return answer in CONFIRM_HEARD
+            answer = input(f"{prompt} (yes/no): ").strip().lower()
+            return heard_is_confirmation(answer)
         self._overlay.show()
         sub = prompt if len(prompt) <= 180 else prompt[:177] + "…"
         self._set_overlay_phase("confirm", sub)
-        console_ui.emit(f"{prompt} Say 'yes' or 'confirm' anytime.", style="yellow")
+        console_ui.emit(prompt, style="yellow")
         tts_thread = self._tts.speak_async(prompt, cancel_event=self._cancel_event)
-        self._set_overlay_phase(
-            "listening",
-            "Say yes or confirm — you don't need to wait for me to finish.",
-        )
-        heard = self._listener.listen_once(
-            echo_status=self._echo_listen_status,
-            idle_rms_threshold=self._idle_rms_threshold,
-            on_speech_pause=self._on_speech_pause_processing
-            if self._show_processing_on_speech_pause
-            else None,
-            speech_pause_to_processing_sec=self._speech_pause_to_processing_sec,
-            cancel_event=self._cancel_event,
-        )
+        tts_stopped = False
+
+        def stop_tts_on_voice() -> None:
+            nonlocal tts_stopped
+            if not tts_stopped:
+                self._tts.stop()
+                tts_stopped = True
+
+        deadline = time.monotonic() + 18.0
+        attempts = 0
+        while time.monotonic() < deadline and attempts < 5:
+            attempts += 1
+            self._set_overlay_phase(
+                "listening",
+                "Yes, sure, or go ahead — anytime.",
+            )
+            heard = self._listener.listen_once(
+                echo_status=attempts == 1 and self._echo_listen_status,
+                idle_rms_threshold=self._idle_rms_threshold,
+                on_speech_pause=self._on_speech_pause_processing
+                if self._show_processing_on_speech_pause
+                else None,
+                speech_pause_to_processing_sec=self._speech_pause_to_processing_sec,
+                cancel_event=self._cancel_event,
+                on_voice_start=stop_tts_on_voice,
+            )
+            if self._user_cancelled:
+                break
+            if not heard.strip():
+                continue
+            console_ui.emit_voice(f"Heard confirmation: {heard}")
+            if heard_is_likely_prompt_echo(heard, prompt):
+                continue
+            if heard_is_denial(heard):
+                self._tts.stop()
+                tts_thread.join(timeout=1.0)
+                return False
+            if heard_is_confirmation(heard):
+                self._tts.stop()
+                tts_thread.join(timeout=1.0)
+                return True
         self._tts.stop()
         tts_thread.join(timeout=1.0)
-        if self._user_cancelled:
-            return False
-        console_ui.emit_voice(f"Heard confirmation: {heard}")
-        return heard_is_confirmation(heard)
+        return False

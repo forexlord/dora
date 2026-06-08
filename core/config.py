@@ -10,7 +10,13 @@ from typing import Any
 
 logger = logging.getLogger("dora.config")
 
-CONFIG_SCHEMA_VERSION = 3
+CONFIG_SCHEMA_VERSION = 4
+
+_DEFAULT_WHISPER_PROMPT_V4 = (
+    "Dora, hey Dora, doora, adora. Wake word Dora. "
+    "Open Chrome. Open Brave. Open WhatsApp. Mute. Volume up. "
+    "What is my battery."
+)
 
 _LEGACY_KEY_ALIASES: dict[str, str] = {
     "ollama_num_ctx": "llm_n_ctx",
@@ -77,6 +83,11 @@ def migrate_config_schema(raw: Mapping[str, Any]) -> tuple[dict[str, Any], bool]
             data["whisper_model"] = "small.en"
             changed = True
         changed = True
+    if version < 4:
+        old_prompt = str(data.get("whisper_initial_prompt", "")).strip()
+        if not old_prompt or "doora" not in old_prompt.lower():
+            data["whisper_initial_prompt"] = _DEFAULT_WHISPER_PROMPT_V4
+            changed = True
     if version < CONFIG_SCHEMA_VERSION:
         data["config_schema_version"] = CONFIG_SCHEMA_VERSION
         changed = True
@@ -111,10 +122,7 @@ class DoraConfig:
     whisper_language: str = "en"
     whisper_end_silence_sec: float = 0.6
     whisper_max_utterance_sec: float = 12.0
-    whisper_initial_prompt: str = (
-        "Dora, hey Dora. Open Chrome. Open WhatsApp. Mute. Volume up. "
-        "What is my battery."
-    )
+    whisper_initial_prompt: str = _DEFAULT_WHISPER_PROMPT_V4
     show_status_overlay: bool = True
     show_heard_transcript: bool = True
     wake_word_enabled: bool = True

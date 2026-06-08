@@ -102,6 +102,7 @@ class VoiceListener:
         on_speech_pause: Callable[[], None] | None = None,
         speech_pause_to_processing_sec: float = 0.55,
         cancel_event: threading.Event | None = None,
+        on_voice_start: Callable[[], None] | None = None,
     ) -> str:
         """
         Block until Vosk finalizes a non-empty utterance, or (if idle_timeout_sec set)
@@ -123,6 +124,8 @@ class VoiceListener:
             audio_queue.put(raw)
             preroll.push(raw)
             if pcm16le_rms(raw) >= idle_rms_threshold:
+                if not pause_state["ever_voice"] and on_voice_start is not None:
+                    on_voice_start()
                 last_voice_mono = time.monotonic()
                 pause_state["ever_voice"] = True
                 pause_state["pause_sent"] = False
