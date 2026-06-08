@@ -23,11 +23,15 @@ class OverlayMixin:
         if self._echo_listen_status:
             console_ui.emit_dim("Processing…")
 
-    def _after_command_captured(self) -> None:
+    def _after_command_captured(self, heard: str | None = None) -> None:
         if self._overlay_user_hidden:
             return
         self._overlay.show()
-        self._set_overlay_phase("thinking", "Working on that — one moment.")
+        snippet = (heard or "").strip()[:100]
+        subtitle = (
+            f'Command: "{snippet}"' if snippet else "Working on that — one moment."
+        )
+        self._set_overlay_phase("thinking", subtitle)
         if self._echo_listen_status:
             console_ui.emit_dim("Processing…")
 

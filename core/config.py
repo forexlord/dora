@@ -10,6 +10,8 @@ from typing import Any
 
 logger = logging.getLogger("dora.config")
 
+CONFIG_SCHEMA_VERSION = 3
+
 _LEGACY_KEY_ALIASES: dict[str, str] = {
     "ollama_num_ctx": "llm_n_ctx",
     "ollama_num_predict_resolve": "llm_num_predict_resolve",
@@ -36,6 +38,51 @@ def migrate_legacy_keys(raw: Mapping[str, Any]) -> dict[str, Any]:
     return data
 
 
+def migrate_config_schema(raw: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
+    """
+    Upgrade older config.json files (e.g. installed copies that still default to Vosk).
+    Returns (data, changed).
+    """
+    data = migrate_legacy_keys(raw)
+    try:
+        version = int(data.get("config_schema_version", 1))
+    except (TypeError, ValueError):
+        version = 1
+    changed = False
+    if version < 2:
+        if str(data.get("stt_engine", "vosk")).strip().lower() == "vosk":
+            data["stt_engine"] = "whisper"
+            changed = True
+        if "whisper_model" not in data or str(data.get("whisper_model", "")).strip() in {
+            "",
+            "small",
+        }:
+            data["whisper_model"] = "small.en"
+            changed = True
+        if "show_heard_transcript" not in data:
+            data["show_heard_transcript"] = True
+            changed = True
+    if version < 3:
+        if str(data.get("stt_engine", "vosk")).strip().lower() == "vosk":
+            data["stt_engine"] = "whisper"
+            changed = True
+        data["whisper_max_utterance_sec"] = 12.0
+        data["whisper_end_silence_sec"] = 0.6
+        data["whisper_initial_prompt"] = (
+            "Dora, hey Dora. Open Chrome. Open WhatsApp. Mute. Volume up. "
+            "What is my battery."
+        )
+        data["whisper_idle_rms_threshold"] = 380.0
+        if str(data.get("whisper_model", "")).strip() in {"", "small"}:
+            data["whisper_model"] = "small.en"
+            changed = True
+        changed = True
+    if version < CONFIG_SCHEMA_VERSION:
+        data["config_schema_version"] = CONFIG_SCHEMA_VERSION
+        changed = True
+    return data, changed
+
+
 def config_to_runtime_dict(config: DoraConfig | Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(config, DoraConfig):
         return config.to_dict()
@@ -48,25 +95,28 @@ class DoraConfig:
     sample_rate: int = 16000
     audio_input_device: int | str | None = None
     audio_stream_retries: int = 4
-    stt_engine: str = "vosk"
+    stt_engine: str = "whisper"
     vosk_model_path: str = "models/vosk-model-small-en-us-0.15"
     auto_download_vosk_model: bool = True
     vosk_model_url: str = (
         "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
     )
     vosk_idle_rms_threshold: float = 520.0
+    whisper_idle_rms_threshold: float = 380.0
     show_processing_on_speech_pause: bool = True
     speech_pause_to_processing_sec: float = 0.42
-    whisper_model: str = "small"
+    whisper_model: str = "small.en"
     whisper_device: str = "auto"
     whisper_compute_type: str = "default"
     whisper_language: str = "en"
-    whisper_end_silence_sec: float = 0.85
-    whisper_max_utterance_sec: float = 45.0
+    whisper_end_silence_sec: float = 0.6
+    whisper_max_utterance_sec: float = 12.0
     whisper_initial_prompt: str = (
-        "wake words include Dora and hey Dora. Voice assistant commands."
+        "Dora, hey Dora. Open Chrome. Open WhatsApp. Mute. Volume up. "
+        "What is my battery."
     )
     show_status_overlay: bool = True
+    show_heard_transcript: bool = True
     wake_word_enabled: bool = True
     wake_word: str = "dora"
     wake_phrases: list[str] = field(default_factory=list)
@@ -108,10 +158,11 @@ class DoraConfig:
     allow_chat_fallback: bool = True
     auto_discover_apps: bool = True
     trust_mapped_apps: bool = False
+    config_schema_version: int = CONFIG_SCHEMA_VERSION
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any], *, strict: bool = False) -> DoraConfig:
-        data = migrate_legacy_keys(raw)
+        data, _changed = migrate_config_schema(raw)
         known = {f.name for f in fields(cls)}
         unknown = sorted(set(data) - known)
         if unknown:
@@ -152,7 +203,16 @@ class DoraConfig:
         return self.llm_n_ctx if self.llm_n_ctx > 0 else None
 
 
-def load_dora_config(path: str | Path, *, strict: bool = False) -> DoraConfig:
+def load_dora_config(
+    path: str | Path, *, strict: bool = False, persist_migrations: bool = True
+) -> DoraConfig:
+    from core.bootstrap import persist_config
     from core.paths import load_json
 
-    return DoraConfig.from_mapping(load_json(Path(path)), strict=strict)
+    cfg_path = Path(path)
+    raw = load_json(cfg_path)
+    data, changed = migrate_config_schema(raw)
+    if changed and persist_migrations:
+        persist_config(data, path=str(cfg_path))
+        logger.info("Updated %s to config schema v%s", cfg_path, CONFIG_SCHEMA_VERSION)
+    return DoraConfig.from_mapping(data, strict=strict)

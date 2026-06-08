@@ -1,6 +1,6 @@
 # Dora
 
-**Dora** is a local Windows voice assistant. Say **“Dora”** or **“hey Dora”**, then ask for apps, volume, battery, or chat. Speech runs offline (Vosk); understanding and chat use a **local GGUF model** (Phi-3 Mini via llama.cpp — no Ollama required).
+**Dora** is a local Windows voice assistant. Say **“Dora”** or **“hey Dora”**, then ask for apps, volume, battery, or chat. Speech runs offline (**faster-whisper**, `small.en` by default); understanding and chat use a **local GGUF model** (Phi-3 Mini via llama.cpp — no Ollama required).
 
 **Creator:** Recovery Eyo — software engineer, Nigeria.
 
@@ -135,15 +135,21 @@ Dora creates `permissions.json` automatically. By default (`trust_mapped_apps: f
 
 Set `trust_mapped_apps: true` in `config.json` only if you want apps found on your PC to open without that first voice confirmation (less strict, more convenient).
 
-## Optional: Whisper speech engine
+## Speech recognition (faster-whisper)
 
-Default STT is Vosk (offline, included in the installer). For Whisper instead:
+Default STT is **faster-whisper** with the English `small.en` model (`int8` on CPU). On first run, the model downloads from Hugging Face (~460 MB).
 
-```powershell
-pip install -e ".[whisper]"
+To use the lighter/faster model, set in `config.json`:
+
+```json
+"whisper_model": "base.en"
 ```
 
-Then set `"stt_engine": "whisper"` in `config.json`.
+To switch back to Vosk (smaller download, less accurate):
+
+```json
+"stt_engine": "vosk"
+```
 
 ## For developers
 
@@ -165,7 +171,8 @@ Key settings:
 | `wake_word` / `wake_phrases` | Wake detection |
 | `chat_memory_turns` | Multi-turn chat context (default 4) |
 | `trust_mapped_apps` | `false` = voice confirm per new app (default); `true` = auto-allow discovered apps |
-| `stt_engine` | `vosk` (default) or `whisper` |
+| `stt_engine` | `whisper` (default) or `vosk` |
+| `whisper_model` | `small.en` (default), `base.en`, etc. |
 | `llm_model_path` | Local GGUF file |
 | `warmup_llm_on_start` | Pre-load model at startup |
 

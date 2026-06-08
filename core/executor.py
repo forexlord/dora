@@ -12,7 +12,7 @@ from core.app_close import (
     close_uwp_by_name,
     kill_by_process_patterns,
 )
-from core.app_resolve import resolve_app_key
+from core.app_resolve import apply_app_alias, resolve_app_key
 from core.discovery import build_runtime_launch_index, find_app_executable, normalize_app_name
 from core.permissions import PermissionStore
 from core.win_subprocess import popen_no_console, run_no_console
@@ -146,6 +146,21 @@ class CommandExecutor:
         )
         return result.returncode == 0
 
+    def _resolve_launch_key(
+        self, app_key: str, index: dict[str, str]
+    ) -> tuple[str, str | None, float]:
+        alias_key = apply_app_alias(app_key)
+        if alias_key in index:
+            return alias_key, alias_key, 1.0
+        if app_key in index:
+            return app_key, app_key, 1.0
+        resolved_key, confidence = self._resolve_app_key(alias_key, index)
+        if resolved_key is None and alias_key != app_key:
+            resolved_key, confidence = self._resolve_app_key(app_key, index)
+        if resolved_key and confidence >= 0.58:
+            return resolved_key, resolved_key, confidence
+        return app_key, resolved_key, confidence if resolved_key else 0.0
+
     def open_app(
         self, app_name: str, confirm_fn: Callable[[str], bool] | None = None
     ) -> tuple[bool, str]:
@@ -155,24 +170,29 @@ class CommandExecutor:
             return False, self._not_found_message(app_name, app_key)
 
         index = self._get_launch_index()
-        resolved_key, confidence = self._resolve_app_key(app_key, index)
-        if resolved_key and resolved_key != app_key and confidence >= 0.42:
-            if confidence < 0.85:
-                if not self._confirm(
-                    self._disambiguation_prompt(
-                        suggested_key=resolved_key,
-                        heard_display=display_label,
-                        heard_key=app_key,
-                        for_open=True,
-                    ),
-                    confirm_fn,
-                ):
-                    return (
-                        False,
-                        f"Canceled — not opening {self._pretty_app_label(resolved_key)}. "
-                        f'You said: "{display_label or app_key}".',
-                    )
-            app_key = resolved_key
+        heard_key = app_key
+        app_key, resolved_key, confidence = self._resolve_launch_key(app_key, index)
+        compare_key = apply_app_alias(heard_key)
+        if (
+            resolved_key
+            and resolved_key != heard_key
+            and resolved_key != compare_key
+            and confidence < 0.80
+        ):
+            if not self._confirm(
+                self._disambiguation_prompt(
+                    suggested_key=resolved_key,
+                    heard_display=display_label,
+                    heard_key=heard_key,
+                    for_open=True,
+                ),
+                confirm_fn,
+            ):
+                return (
+                    False,
+                    f"Canceled — not opening {self._pretty_app_label(resolved_key)}. "
+                    f'You said: "{display_label or heard_key}".',
+                )
 
         app_path = index.get(app_key)
         if not app_path:
@@ -221,24 +241,29 @@ class CommandExecutor:
         display_label = app_name.strip()
         app_key = normalize_app_name(app_name)
         index = self._get_launch_index()
-        resolved_key, confidence = self._resolve_app_key(app_key, index)
-        if resolved_key and resolved_key != app_key and confidence >= 0.42:
-            if confidence < 0.85:
-                if not self._confirm(
-                    self._disambiguation_prompt(
-                        suggested_key=resolved_key,
-                        heard_display=display_label,
-                        heard_key=app_key,
-                        for_open=False,
-                    ),
-                    confirm_fn,
-                ):
-                    return (
-                        False,
-                        f"Canceled — not closing {self._pretty_app_label(resolved_key)}. "
-                        f'You said: "{display_label or app_key}".',
-                    )
-            app_key = resolved_key
+        heard_key = app_key
+        app_key, resolved_key, confidence = self._resolve_launch_key(app_key, index)
+        compare_key = apply_app_alias(heard_key)
+        if (
+            resolved_key
+            and resolved_key != heard_key
+            and resolved_key != compare_key
+            and confidence < 0.80
+        ):
+            if not self._confirm(
+                self._disambiguation_prompt(
+                    suggested_key=resolved_key,
+                    heard_display=display_label,
+                    heard_key=heard_key,
+                    for_open=False,
+                ),
+                confirm_fn,
+            ):
+                return (
+                    False,
+                    f"Canceled — not closing {self._pretty_app_label(resolved_key)}. "
+                    f'You said: "{display_label or heard_key}".',
+                )
 
         if force:
             if not self._confirm(f"Force close {app_key}?", confirm_fn):

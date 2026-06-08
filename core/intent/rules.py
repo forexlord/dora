@@ -34,7 +34,8 @@ def extract_target_after_keyword(normalized: str, keywords: frozenset[str]) -> s
         return None
 
     filler_prefix = re.compile(
-        r"^(please|the|my|a|an|app|application|for|me|to|just|now)\b\s*",
+        r"^(please|the|my|a|an|app|application|for|me|to|just|now|and|up|"
+        r"them|him|her|it|that|this|guy|guys|can|you)\b\s*",
         re.IGNORECASE,
     )
     while True:
@@ -42,6 +43,10 @@ def extract_target_after_keyword(normalized: str, keywords: frozenset[str]) -> s
         if cleaned == target:
             break
         target = cleaned
+
+    words = target.split()
+    if len(words) > 4:
+        target = " ".join(words[-3:])
 
     return target or None
 

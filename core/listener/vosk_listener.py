@@ -14,12 +14,15 @@ from vosk import KaldiRecognizer, Model
 
 from core import console_ui
 from core.listener.audio import (
+    AudioPreroll,
     VoiceSetupError,
     input_device_ready,
     pcm16le_rms,
     portaudio_errors,
     reset_audio_backend,
 )
+
+_STREAM_BLOCKSIZE = 4000
 
 
 class VoiceListener:
@@ -106,6 +109,8 @@ class VoiceListener:
         """
         audio_queue: queue.Queue[bytes] = queue.Queue()
         recognizer = KaldiRecognizer(self.model, self.sample_rate)
+        preroll = AudioPreroll(self.sample_rate)
+        preroll_sent = False
         start_mono = time.monotonic()
         last_voice_mono = start_mono
         pause_state = {"ever_voice": False, "pause_sent": False}
@@ -116,6 +121,7 @@ class VoiceListener:
                 console_ui.emit_dim(f"[audio] {status}")
             raw = bytes(indata)
             audio_queue.put(raw)
+            preroll.push(raw)
             if pcm16le_rms(raw) >= idle_rms_threshold:
                 last_voice_mono = time.monotonic()
                 pause_state["ever_voice"] = True
@@ -142,7 +148,7 @@ class VoiceListener:
             try:
                 with sd.RawInputStream(
                     samplerate=self.sample_rate,
-                    blocksize=8000,
+                    blocksize=_STREAM_BLOCKSIZE,
                     dtype="int16",
                     channels=1,
                     callback=callback,
@@ -179,6 +185,26 @@ class VoiceListener:
                             ):
                                 on_speech_pause()
                                 pause_state["pause_sent"] = True
+                            continue
+                        if (
+                            not preroll_sent
+                            and pcm16le_rms(data) >= idle_rms_threshold
+                        ):
+                            lead_in = preroll.snapshot()
+                            preroll_sent = True
+                            preroll.clear()
+                            if lead_in and recognizer.AcceptWaveform(lead_in):
+                                if (
+                                    on_speech_pause
+                                    and not pause_state["pause_sent"]
+                                    and pause_state["ever_voice"]
+                                ):
+                                    on_speech_pause()
+                                    pause_state["pause_sent"] = True
+                                result = json.loads(recognizer.Result())
+                                text = result.get("text", "").strip()
+                                if text:
+                                    return text
                             continue
                         if recognizer.AcceptWaveform(data):
                             if (

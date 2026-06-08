@@ -86,9 +86,15 @@ class DoraAssistant(
         self._text_fallback_enabled = config.allow_text_fallback
         self._warmup_llm_on_start = config.warmup_llm_on_start
         self._llm_ready = False
-        self._idle_rms_threshold = config.vosk_idle_rms_threshold
+        if config.stt_engine.strip().lower() == "whisper":
+            self._idle_rms_threshold = config.whisper_idle_rms_threshold
+        else:
+            self._idle_rms_threshold = config.vosk_idle_rms_threshold
         self._echo_listen_status = not config.show_status_overlay
-        console_ui.configure(verbose_voice=self._echo_listen_status)
+        console_ui.configure(
+            verbose_voice=self._echo_listen_status,
+            show_heard=config.show_heard_transcript,
+        )
         self._show_processing_on_speech_pause = config.show_processing_on_speech_pause
         self._speech_pause_to_processing_sec = config.speech_pause_to_processing_sec
         self._startup_complete = False

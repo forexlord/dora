@@ -26,7 +26,7 @@ def create_speech_listener(
     config: DoraConfig | Mapping[str, Any],
 ) -> VoiceListener | WhisperVoiceListener:
     data = _config_dict(config)
-    engine = str(data.get("stt_engine", "vosk")).strip().lower()
+    engine = str(data.get("stt_engine", "whisper")).strip().lower()
     if engine == "whisper":
         return WhisperVoiceListener(data)
     if engine not in {"", "vosk"}:

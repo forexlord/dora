@@ -54,13 +54,7 @@ ruff check core tests
 mypy core
 ```
 
-Optional Whisper STT:
-
-```powershell
-pip install -e ".[whisper]"
-```
-
-Set `"stt_engine": "whisper"` in `config.json`.
+Default STT is **faster-whisper** (`small.en`, `int8` on CPU). Set `"stt_engine": "vosk"` in `config.json` to use Vosk instead.
 
 ## Configuration
 

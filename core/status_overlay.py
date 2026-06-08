@@ -260,7 +260,10 @@ class StatusOverlay:
                     break
                 drained = True
                 if item is self._SHUTDOWN:
-                    root.destroy()
+                    try:
+                        root.quit()
+                    except tk.TclError:
+                        pass
                     return
                 if item is _HIDE_WINDOW:
                     state["visible"] = False
@@ -320,6 +323,10 @@ class StatusOverlay:
         try:
             root.mainloop()
         finally:
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
             self._started = False
 
 

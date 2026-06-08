@@ -36,7 +36,10 @@ class StartupMixin:
                     f"Updated config vosk_model_path -> {discovered_path}", style="cyan"
                 )
         else:
-            console_ui.emit("Speech model: Whisper (Vosk download skipped).", style="cyan")
+            console_ui.emit(
+                "Speech model: faster-whisper (downloads on first listen if needed).",
+                style="cyan",
+            )
 
         if self._use_llm or self._allow_chat_fallback:
             console_ui.emit("Checking local AI tools (llama.cpp)...", style="cyan")

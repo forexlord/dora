@@ -64,13 +64,18 @@ class InputMixin:
                 return None
             if self._user_cancelled:
                 return None
-            console_ui.emit_heard(text)
-            normalized_text = " ".join(text.lower().strip().split())
+            raw_heard = text.strip()
+            if self._config.show_heard_transcript and raw_heard:
+                console_ui.emit_heard(raw_heard)
+                if not self._overlay_user_hidden:
+                    self._overlay.show()
+                    self._set_overlay_phase("thinking", f'Heard: "{raw_heard[:100]}"')
+            normalized_text = " ".join(raw_heard.lower().split())
             if self._wake_word_enabled and self._wake_phrases:
-                text = self._apply_wake_word_gate(text, normalized_text, state)
+                text = self._apply_wake_word_gate(raw_heard, normalized_text, state)
                 if text is None:
                     return None
-            self._after_command_captured()
+            self._after_command_captured(text)
             return text
 
         self._set_overlay_phase("text_mode")

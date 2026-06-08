@@ -73,6 +73,28 @@ def input_device_ready(device: int | None) -> bool:
         return False
 
 
+class AudioPreroll:
+    """Keep the last N seconds of mic audio so utterance onset is not clipped."""
+
+    def __init__(self, sample_rate: int, *, seconds: float = 0.6) -> None:
+        self._max_bytes = max(1, int(sample_rate * 2 * seconds))
+        self._buf = bytearray()
+
+    def push(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        self._buf.extend(chunk)
+        overflow = len(self._buf) - self._max_bytes
+        if overflow > 0:
+            del self._buf[:overflow]
+
+    def snapshot(self) -> bytes:
+        return bytes(self._buf)
+
+    def clear(self) -> None:
+        self._buf.clear()
+
+
 def pcm16le_rms(raw: bytes) -> float:
     count = len(raw) // 2
     if count <= 0:

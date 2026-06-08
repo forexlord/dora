@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 
+from core.app_resolve import well_known_windows_apps
 from core.win_subprocess import run_no_console
 
 
@@ -92,6 +93,7 @@ def build_app_index() -> tuple[dict[str, str], dict[str, int]]:
     combined: dict[str, str] = {}
     shortcuts = discover_start_menu_shortcuts()
     uwp_apps = discover_uwp_start_apps()
+    combined.update(well_known_windows_apps())
     combined.update(shortcuts)
     combined.update(uwp_apps)
     stats = {

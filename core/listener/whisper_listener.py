@@ -12,6 +12,7 @@ import sounddevice as sd
 
 from core import console_ui
 from core.listener.audio import (
+    AudioPreroll,
     VoiceSetupError,
     input_device_ready,
     parse_audio_stream_retries,
@@ -20,6 +21,8 @@ from core.listener.audio import (
     portaudio_errors,
     reset_audio_backend,
 )
+
+_STREAM_BLOCKSIZE = 4000
 
 
 def _resolve_whisper_device(cfg_value: str) -> str:
@@ -43,6 +46,15 @@ def _default_whisper_compute_type(device: str, cfg_value: str) -> str:
     return "int8" if device == "cpu" else "float16"
 
 
+def _normalize_whisper_model(model_name: str, language: str) -> str:
+    """Prefer English-only checkpoints (smaller, faster) when language is English."""
+    name = (model_name or "small.en").strip() or "small.en"
+    lang = (language or "en").strip().lower()
+    if lang.startswith("en") and "." not in name:
+        return f"{name}.en"
+    return name
+
+
 class WhisperVoiceListener:
     """
     Phrase-at-a-time recognition with faster-whisper (OpenAI-style model).
@@ -60,19 +72,23 @@ class WhisperVoiceListener:
             ) from exc
 
         self.sample_rate = int(config.get("sample_rate", 16000))
-        self._model_name = str(config.get("whisper_model", "small")).strip() or "small"
+        self._language = str(config.get("whisper_language", "en")).strip() or "en"
+        self._model_name = _normalize_whisper_model(
+            str(config.get("whisper_model", "small.en")),
+            self._language,
+        )
         device = _resolve_whisper_device(str(config.get("whisper_device", "auto")))
         compute_type = _default_whisper_compute_type(
             device, str(config.get("whisper_compute_type", "default"))
         )
-        self._language = str(config.get("whisper_language", "en")).strip() or "en"
         prompt = str(config.get("whisper_initial_prompt", "")).strip()
         self._initial_prompt = prompt or None
         self._utterance_end_silence = float(config.get("whisper_end_silence_sec", 0.85))
         self._max_utterance_sec = float(config.get("whisper_max_utterance_sec", 45.0))
 
         console_ui.emit(
-            f"Loading Whisper model {self._model_name!r} ({device}, {compute_type})…",
+            f"Loading faster-whisper {self._model_name!r} ({device}, {compute_type})… "
+            "First run downloads the model (~460 MB for small.en).",
             style="cyan",
         )
         self._model = WhisperModel(
@@ -97,8 +113,18 @@ class WhisperVoiceListener:
         segments, _info = self._model.transcribe(
             audio,
             language=self._language,
-            beam_size=5,
+            beam_size=3,
+            best_of=3,
+            temperature=0.0,
             vad_filter=True,
+            vad_parameters={
+                "min_silence_duration_ms": 400,
+                "speech_pad_ms": 200,
+            },
+            condition_on_previous_text=False,
+            compression_ratio_threshold=2.0,
+            log_prob_threshold=-1.0,
+            no_speech_threshold=0.55,
             initial_prompt=self._initial_prompt,
         )
         return "".join(segment.text for segment in segments).strip()
@@ -116,6 +142,8 @@ class WhisperVoiceListener:
     ) -> str:
         audio_queue: queue.Queue[bytes] = queue.Queue()
         buffer = bytearray()
+        preroll = AudioPreroll(self.sample_rate)
+        preroll_merged = False
         start_mono = time.monotonic()
         last_voice_mono = start_mono
         saw_voice = False
@@ -128,6 +156,7 @@ class WhisperVoiceListener:
                 console_ui.emit_dim(f"[audio] {status}")
             raw = bytes(indata)
             audio_queue.put(raw)
+            preroll.push(raw)
             if pcm16le_rms(raw) >= idle_rms_threshold:
                 last_voice_mono = time.monotonic()
                 saw_voice = True
@@ -154,7 +183,7 @@ class WhisperVoiceListener:
             try:
                 with sd.RawInputStream(
                     samplerate=self.sample_rate,
-                    blocksize=8000,
+                    blocksize=_STREAM_BLOCKSIZE,
                     dtype="int16",
                     channels=1,
                     callback=callback,
@@ -208,6 +237,13 @@ class WhisperVoiceListener:
                                 pause_sent = True
                             continue
                         rms = pcm16le_rms(data)
+                        voice_now = rms >= idle_rms_threshold
+                        if voice_now and not preroll_merged:
+                            lead_in = preroll.snapshot()
+                            if lead_in:
+                                buffer.extend(lead_in)
+                            preroll_merged = True
+                            preroll.clear()
                         if saw_voice or rms >= idle_rms_threshold * 0.35:
                             buffer.extend(data)
                             if len(buffer) > max_bytes:

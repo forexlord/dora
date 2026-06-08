@@ -6,12 +6,14 @@ from rich.console import Console
 
 _console = Console(legacy_windows=False)
 _verbose_voice = False
+_show_heard = True
 
 
-def configure(*, verbose_voice: bool) -> None:
-    """When False (overlay on), skip mic/wake/thinking transcript lines in the terminal."""
-    global _verbose_voice
+def configure(*, verbose_voice: bool, show_heard: bool = True) -> None:
+    """When verbose_voice is False (overlay on), most mic lines stay off the terminal."""
+    global _verbose_voice, _show_heard
     _verbose_voice = verbose_voice
+    _show_heard = show_heard
 
 
 def emit_markup(text: str) -> None:
@@ -43,7 +45,7 @@ def emit_dim(text: str) -> None:
 
 
 def emit_heard(text: str) -> None:
-    if not _verbose_voice:
+    if not (_verbose_voice or _show_heard):
         return
     _console.print(f"Heard: {text}", style="cyan")
 

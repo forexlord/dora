@@ -11,6 +11,11 @@ def test_parse_open_intent() -> None:
     assert intent == {"type": "open", "app": "google chrome"}
 
 
+def test_parse_open_strips_stt_junk_prefix() -> None:
+    intent = parse_rule_intent("can you please open and was up")
+    assert intent == {"type": "open", "app": "was up"}
+
+
 def test_parse_force_close_intent() -> None:
     intent = parse_rule_intent("force close spotify")
     assert intent == {"type": "close", "app": "spotify", "force": True}
