@@ -12,6 +12,7 @@ from pathlib import Path
 import sounddevice as sd
 from vosk import KaldiRecognizer, Model
 
+from core import console_ui
 from core.listener.audio import (
     VoiceSetupError,
     input_device_ready,
@@ -112,7 +113,7 @@ class VoiceListener:
         def callback(indata, frames, time_info, status):  # noqa: ANN001, ANN202
             nonlocal last_voice_mono
             if status:
-                print(f"[audio] {status}")
+                console_ui.emit_dim(f"[audio] {status}")
             raw = bytes(indata)
             audio_queue.put(raw)
             if pcm16le_rms(raw) >= idle_rms_threshold:
@@ -121,7 +122,7 @@ class VoiceListener:
                 pause_state["pause_sent"] = False
 
         if echo_status:
-            print("Listening... speak now.")
+            console_ui.emit_listen_prompt()
 
         if not input_device_ready(self._input_device):
             reset_audio_backend()
@@ -133,9 +134,10 @@ class VoiceListener:
             if attempt > 0:
                 reset_audio_backend()
                 time.sleep(0.2 + 0.2 * attempt)
-                print(
-                    f"[yellow]Microphone stream failed ({last_audio_exc}); "
-                    f"retry {attempt + 1}/{self._audio_stream_retries}…[/yellow]"
+                console_ui.emit(
+                    f"Microphone stream failed ({last_audio_exc}); "
+                    f"retry {attempt + 1}/{self._audio_stream_retries}…",
+                    style="yellow",
                 )
             try:
                 with sd.RawInputStream(

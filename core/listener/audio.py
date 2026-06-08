@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import sounddevice as sd
+
+from core import console_ui
+
+logger = logging.getLogger("dora.audio")
 
 
 class VoiceSetupError(Exception):
@@ -41,7 +46,11 @@ def parse_input_device(config: dict[str, Any]) -> int | None:
     try:
         return int(raw)
     except (TypeError, ValueError):
-        print(f"[yellow]Invalid audio_input_device {raw!r}; using system default.[/yellow]")
+        console_ui.emit(
+            f"Invalid audio_input_device {raw!r}; using system default.",
+            style="yellow",
+        )
+        logger.warning("Invalid audio_input_device %r; using system default.", raw)
         return None
 
 

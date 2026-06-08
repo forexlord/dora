@@ -1,15 +1,21 @@
-"""Voice session state and short-turn chat memory."""
+"""Voice session state and multi-turn chat memory."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass
+class ChatTurn:
+    user: str
+    assistant: str
 
 
 @dataclass
 class SessionState:
     wake_armed_until: float = 0.0
     pending_followup: dict[str, str] | None = None
-    chat_context: dict[str, str] | None = None
+    chat_turns: list[ChatTurn] = field(default_factory=list)
 
 
 SESSION_END_TTS = "Call again when you need me."
@@ -20,32 +26,45 @@ CONFIRM_HEARD = frozenset(
 
 
 def remember_chat_turn(
-    state: SessionState, user_text: str, assistant_text: str
+    state: SessionState,
+    user_text: str,
+    assistant_text: str,
+    *,
+    max_turns: int = 4,
 ) -> None:
     reply = (assistant_text or "").strip()
-    if not reply:
+    user = " ".join(user_text.strip().split())
+    if not reply and not user:
         return
-    state.chat_context = {
-        "user": " ".join(user_text.strip().split()),
-        "assistant": reply,
-    }
+    state.chat_turns.append(ChatTurn(user=user, assistant=reply))
+    limit = max(1, int(max_turns))
+    if len(state.chat_turns) > limit:
+        state.chat_turns = state.chat_turns[-limit:]
 
 
-def build_chat_followup_context(state: SessionState, current_text: str) -> str | None:
-    ctx = state.chat_context
-    if not ctx or not str(ctx.get("assistant", "")).strip():
+def build_chat_followup_context(
+    state: SessionState,
+    current_text: str,
+    *,
+    max_turns: int = 4,
+) -> str | None:
+    if not state.chat_turns:
         return None
-    return (
-        "Context: Continue the same voice conversation.\n"
-        f"Your last reply was: {ctx['assistant']}\n"
-        f"Earlier they said: {ctx.get('user', '')}\n"
-        f"They now say: {' '.join(current_text.strip().split())}\n"
-        "Reply naturally as a follow-up. Do not repeat User: or Dora: labels."
-    )
+    limit = max(1, int(max_turns))
+    recent = state.chat_turns[-limit:]
+    lines = ["Context: Continue the same voice conversation."]
+    for turn in recent:
+        if turn.user:
+            lines.append(f"They said: {turn.user}")
+        if turn.assistant:
+            lines.append(f"Your last reply was: {turn.assistant}")
+    lines.append(f"They now say: {' '.join(current_text.strip().split())}")
+    lines.append("Reply naturally as a follow-up. Do not repeat User: or Dora: labels.")
+    return "\n".join(lines)
 
 
 def clear_chat_context(state: SessionState) -> None:
-    state.chat_context = None
+    state.chat_turns.clear()
 
 
 def heard_is_confirmation(heard: str) -> bool:

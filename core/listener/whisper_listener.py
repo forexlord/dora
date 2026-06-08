@@ -10,6 +10,7 @@ from typing import Any
 
 import sounddevice as sd
 
+from core import console_ui
 from core.listener.audio import (
     VoiceSetupError,
     input_device_ready,
@@ -70,7 +71,10 @@ class WhisperVoiceListener:
         self._utterance_end_silence = float(config.get("whisper_end_silence_sec", 0.85))
         self._max_utterance_sec = float(config.get("whisper_max_utterance_sec", 45.0))
 
-        print(f"[cyan]Loading Whisper model[/cyan] {self._model_name!r} ({device}, {compute_type})…")
+        console_ui.emit(
+            f"Loading Whisper model {self._model_name!r} ({device}, {compute_type})…",
+            style="cyan",
+        )
         self._model = WhisperModel(
             self._model_name,
             device=device,
@@ -121,7 +125,7 @@ class WhisperVoiceListener:
         def callback(indata, frames, time_info, status):  # noqa: ANN001, ANN202
             nonlocal last_voice_mono, saw_voice, pause_sent
             if status:
-                print(f"[audio] {status}")
+                console_ui.emit_dim(f"[audio] {status}")
             raw = bytes(indata)
             audio_queue.put(raw)
             if pcm16le_rms(raw) >= idle_rms_threshold:
@@ -130,7 +134,7 @@ class WhisperVoiceListener:
                 pause_sent = False
 
         if echo_status:
-            print("Listening... speak now.")
+            console_ui.emit_listen_prompt()
 
         if not input_device_ready(self._input_device):
             reset_audio_backend()
@@ -142,9 +146,10 @@ class WhisperVoiceListener:
             if attempt > 0:
                 reset_audio_backend()
                 time.sleep(0.2 + 0.2 * attempt)
-                print(
-                    f"[yellow]Microphone stream failed ({last_audio_exc}); "
-                    f"retry {attempt + 1}/{self._audio_stream_retries}…[/yellow]"
+                console_ui.emit(
+                    f"Microphone stream failed ({last_audio_exc}); "
+                    f"retry {attempt + 1}/{self._audio_stream_retries}…",
+                    style="yellow",
                 )
             try:
                 with sd.RawInputStream(

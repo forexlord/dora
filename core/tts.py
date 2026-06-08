@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-import subprocess
+import logging
+import sys
 import threading
-import time
-from typing import Any
+from typing import TYPE_CHECKING
 
-from core.win_subprocess import popen_no_console
+if TYPE_CHECKING:
+    from core.win_com import SapiSpeechSynthesizer
+
+logger = logging.getLogger("dora.tts")
 
 
 class TextToSpeech:
@@ -20,23 +23,26 @@ class TextToSpeech:
         self.rate = rate
         self.volume = max(0, min(100, int(volume)))
         self.preferred_voice = (preferred_voice or "").strip().lower()
-        self._proc: subprocess.Popen[Any] | None = None
+        self._engine: SapiSpeechSynthesizer | None = None
+        self._thread: threading.Thread | None = None
+
+    def _get_engine(self) -> SapiSpeechSynthesizer:
+        if self._engine is None:
+            from core.win_com import SapiSpeechSynthesizer
+
+            self._engine = SapiSpeechSynthesizer(
+                rate=self.rate,
+                volume=self.volume,
+                preferred_voice=self.preferred_voice,
+            )
+        return self._engine
 
     def stop(self) -> None:
-        proc = self._proc
-        if proc is None or proc.poll() is not None:
-            return
-        try:
-            proc.terminate()
-        except OSError:
-            pass
-        try:
-            proc.wait(timeout=1.0)
-        except subprocess.TimeoutExpired:
+        if self._engine is not None:
             try:
-                proc.kill()
-            except OSError:
-                pass
+                self._engine.stop()
+            except Exception:
+                logger.exception("Failed to stop TTS engine")
 
     def speak_async(
         self,
@@ -44,7 +50,6 @@ class TextToSpeech:
         *,
         cancel_event: threading.Event | None = None,
     ) -> threading.Thread:
-        """Start speech on a background thread; caller can listen concurrently."""
         thread = threading.Thread(
             target=self.speak,
             args=(text,),
@@ -52,6 +57,7 @@ class TextToSpeech:
             name="dora-tts",
             daemon=True,
         )
+        self._thread = thread
         thread.start()
         return thread
 
@@ -68,37 +74,10 @@ class TextToSpeech:
             return
         if cancel_event is not None and cancel_event.is_set():
             return
-        safe = message.replace("'", "''")
-        voice_select = ""
-        if self.preferred_voice:
-            safe_voice = self.preferred_voice.replace("'", "''")
-            voice_select = (
-                "$voice = $speak.GetInstalledVoices() | "
-                "ForEach-Object { $_.VoiceInfo.Name } | "
-                f"Where-Object {{ $_.ToLower().Contains('{safe_voice}') }} | "
-                "Select-Object -First 1; "
-                "if ($voice) { $speak.SelectVoice($voice) }; "
-            )
-        cmd = (
-            "Add-Type -AssemblyName System.Speech; "
-            "$speak = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-            f"$speak.Rate = {self.rate}; "
-            f"$speak.Volume = {self.volume}; "
-            f"{voice_select}"
-            f"$speak.Speak('{safe}')"
-        )
-        proc = popen_no_console(
-            ["powershell", "-NoProfile", "-Command", cmd],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        self._proc = proc
+        if sys.platform != "win32":
+            logger.warning("TTS is only supported on Windows; skipped: %r", message[:80])
+            return
         try:
-            while proc.poll() is None:
-                if cancel_event is not None and cancel_event.is_set():
-                    self.stop()
-                    return
-                time.sleep(0.05)
-        finally:
-            if self._proc is proc:
-                self._proc = None
+            self._get_engine().speak(message)
+        except Exception:
+            logger.exception("TTS speak failed")

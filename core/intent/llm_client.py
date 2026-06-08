@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -14,26 +15,13 @@ from core.llama_server import (
 
 from .constants import (
     BAD_CLARIFY_SUBSTRINGS,
-    DEFAULT_BRIGHTNESS_STEP_PERCENT,
-    DEFAULT_VOLUME_STEP_PERCENT,
-    DORA_CAPABILITIES_PROMPT,
-    DORA_CREATOR_REPLY,
     REFUSAL_REPLY,
     VALID_CLARIFY_PENDING,
 )
+from .prompts import build_chat_system_prompt, build_resolve_system_prompt
 from .safety import contains_profanity, sanitize_reply_text
 
-_config: dict[str, Any] | None = None
-_model_path: str | None = None
-_port: int = 8765
-_ready: bool = False
-
-
-def configure_llm(config: dict[str, Any], model_path: str) -> None:
-    global _config, _model_path, _port
-    _config = config
-    _model_path = model_path
-    _port = int(config.get("llama_server_port", 8765))
+logger = logging.getLogger("dora.llm")
 
 
 def last_llama_load_error() -> str | None:
@@ -95,14 +83,18 @@ class GgufIntentBackend:
         self._num_predict_resolve = max(24, int(num_predict_resolve))
         self._num_predict_chat = max(32, min(int(num_predict_chat), 160))
         self._temperature_resolve = float(temperature_resolve)
-        configure_llm(self._config, self._model_path)
+        self._port = int(merged.get("llama_server_port", 8765))
+        self._server_ready = False
 
     def _ensure_running(self) -> bool:
-        global _ready
-        if _ready and start_llama_server(self._config, self._model_path, port=_port):
+        if self._server_ready and start_llama_server(
+            self._config, self._model_path, port=self._port
+        ):
             return True
-        ok = start_llama_server(self._config, self._model_path, port=_port)
-        _ready = ok
+        ok = start_llama_server(self._config, self._model_path, port=self._port)
+        self._server_ready = ok
+        if not ok:
+            logger.error("llama-server failed to start: %s", last_server_error())
         return ok
 
     def available(self) -> bool:
@@ -115,7 +107,7 @@ class GgufIntentBackend:
             return False
         try:
             out = chat_completion(
-                _port,
+                self._port,
                 [
                     {
                         "role": "system",
@@ -129,69 +121,18 @@ class GgufIntentBackend:
             )
             return bool(out)
         except Exception:
+            logger.exception("LLM warmup failed")
             return False
 
     def _resolve_system_prompt(self) -> str:
-        step_v = int(DEFAULT_VOLUME_STEP_PERCENT)
-        step_b = int(DEFAULT_BRIGHTNESS_STEP_PERCENT)
-        return (
-            "You are Dora, a Windows voice assistant created by Recovery Eyo "
-            "(software engineer, Nigeria). Never say Microsoft, OpenAI, or another "
-            f"company created you; for creator questions use: {DORA_CREATOR_REPLY}\n"
-            f"{DORA_CAPABILITIES_PROMPT}\n"
-            "Input is speech-to-text: often incomplete or wrong.\n"
-            "To report current volume or battery, use volume_status or battery_status "
-            "types — never invent a number.\n"
-            "If the message includes 'Context:' you are resolving a FOLLOW-UP; parse into system JSON.\n"
-            "IMPORTANT: The computer already measures volume and screen brightness in software. "
-            "NEVER ask the user what the current volume or brightness level is—they cannot see that number. "
-            "NEVER ask 'what is your current volume' or similar.\n"
-            "Decide ONE intent. Output a single JSON object only; keep it compact.\n"
-            "Casual check-ins (e.g. are you there, how are you, can you hear me, what are you doing): "
-            '{"type":"chat","reply":"<one short sentence>"} — never use unknown for those.\n'
-            'open app: {"type":"open","app":"<name>"}\n'
-            'close app normally (like clicking X, no confirmation): '
-            '{"type":"close","app":"<name>","force":false}\n'
-            'force kill only if user said force close/quit/kill or hard close: '
-            '{"type":"close","app":"<name>","force":true}\n'
-            'shutdown PC: {"type":"shutdown"}\n'
-            'volume step (percentage POINTS from current, e.g. +20 means 50% goes to 70%): '
-            '{"type":"volume_relative","delta_percent": <number>}\n'
-            f'If user wants LOUDER or INCREASE volume but gives NO number (e.g. "turn it up", "increase volume", '
-            f'"i want louder"), use {{"type":"volume_relative","delta_percent": {step_v}}} — do NOT use clarify.\n'
-            f'If QUIETER with no number: {{"type":"volume_relative","delta_percent": -{step_v}}}.\n'
-            'volume absolute 0-100: {"type":"volume_set","percent": <number>}\n'
-            '{"type":"volume_mute"}  {"type":"volume_unmute"}\n'
-            '{"type":"volume_status"} — user asks current volume level or if muted\n'
-            '{"type":"battery_status"} — user asks battery percentage or charging\n'
-            f"brightness: same rules; default brighter/dimmer without a number: +{step_b} or -{step_b} "
-            "via brightness_relative.\n"
-            'brightness_set / volume_set when they give an explicit percent.\n'
-            'wifi: {"type":"wifi","action":"toggle"|"on"|"off"}\n'
-            'hotspot: {"type":"hotspot","action":"toggle"|"on"|"off"}\n'
-            'clarify ONLY if you truly need a number they did not give AND a default step is wrong—e.g. they said '
-            '"change volume" without up or down. reply must ask HOW MUCH to change, e.g. "Roughly what percent '
-            'louder—ten, twenty, or thirty?" Never ask for current level.\n'
-            'pending for clarify: volume | brightness | wifi | hotspot\n'
-            'Math (including spoken numbers, multiply/plus/etc.): '
-            '{"type":"chat","reply":"<give the correct numeric result in one short sentence>"}\n'
-            'Definitions and general knowledge (physics, antimatter, "what does X mean", explain) '
-            'without needing live internet: {"type":"chat","reply":"<2-4 short clear sentences>"}\n'
-            'Small talk / thanks / hello: {"type":"chat","reply":"<1-2 short sentences>"}\n'
-            'If user asks what you can do or how you help: {"type":"chat","reply":"<short honest list of real PC controls only>"}\n'
-            "If the user uses slurs, sexual content, hate, asks for illegal or dangerous how-to, "
-            "self-harm instructions, malware, or personalized medical/legal diagnosis: "
-            '{"type":"chat","reply":"I can\'t help with that."} (exactly that reply text)\n'
-            'If nothing fits: {"type":"unknown"}\n'
-            "Lowercase type and action. delta_percent negative means quieter/dimmer."
-        )
+        return build_resolve_system_prompt()
 
     def resolve(self, user_content: str) -> dict[str, Any] | None:
         if not self._ensure_running():
             return None
         try:
             raw = chat_completion(
-                _port,
+                self._port,
                 [
                     {"role": "system", "content": self._resolve_system_prompt()},
                     {"role": "user", "content": user_content},
@@ -205,6 +146,7 @@ class GgufIntentBackend:
                 return None
             return self._normalize_parsed_intent(parsed, user_content)
         except Exception:
+            logger.exception("LLM resolve failed for: %r", user_content[:120])
             return None
 
     def _normalize_parsed_intent(
@@ -292,22 +234,10 @@ class GgufIntentBackend:
     def generate_reply(self, text: str) -> str | None:
         if not self._ensure_running():
             return None
-        system = (
-            "You are Dora, a friendly Windows voice assistant created by Recovery Eyo, "
-            "a software engineer from Nigeria (never say Microsoft or another company "
-            f"made you; creator fact: {DORA_CREATOR_REPLY}). "
-            f"{DORA_CAPABILITIES_PROMPT} "
-            "Reply in 1-3 short spoken sentences. Be warm and direct.\n"
-            "Speak only your answer — never write User:, Dora:, or role-play a transcript.\n"
-            "Do not invent PC volume, battery, or brightness numbers — the app reads those separately.\n"
-            "Never mention weather, reminders, alarms, email, or web search.\n"
-            "Math: state the correct number. Other facts: brief and accurate.\n"
-            "Refuse only serious harm (illegal acts, self-harm, hate, explicit sexual content) "
-            "with exactly: I can't help with that."
-        )
+        system = build_chat_system_prompt()
         try:
             raw = chat_completion(
-                _port,
+                self._port,
                 [
                     {"role": "system", "content": system},
                     {"role": "user", "content": text},
@@ -322,6 +252,7 @@ class GgufIntentBackend:
                 return None
             return sanitize_reply_text(reply)
         except Exception:
+            logger.exception("LLM chat generation failed for: %r", text[:120])
             return None
 
     def chat_reply(self, text: str) -> str | None:

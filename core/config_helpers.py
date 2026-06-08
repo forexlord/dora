@@ -1,23 +1,36 @@
-"""Read config values with legacy key fallbacks."""
+"""Read config values from DoraConfig or plain mappings."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
+from core.config import DoraConfig
 
-def config_get(config: dict[str, Any], *keys: str, default: Any = None) -> Any:
+
+def _mapping(config: DoraConfig | Mapping[str, Any]) -> Mapping[str, Any]:
+    if isinstance(config, DoraConfig):
+        return config.to_dict()
+    return config
+
+
+def config_get(config: DoraConfig | Mapping[str, Any], *keys: str, default: Any = None) -> Any:
+    data = _mapping(config)
     for key in keys:
-        if key in config:
-            return config[key]
+        if key in data:
+            return data[key]
     return default
 
 
-def config_bool(config: dict[str, Any], *keys: str, default: bool = False) -> bool:
-    value = config_get(config, *keys, default=default)
-    return bool(value)
+def config_bool(
+    config: DoraConfig | Mapping[str, Any], *keys: str, default: bool = False
+) -> bool:
+    return bool(config_get(config, *keys, default=default))
 
 
-def config_int(config: dict[str, Any], *keys: str, default: int = 0) -> int:
+def config_int(
+    config: DoraConfig | Mapping[str, Any], *keys: str, default: int = 0
+) -> int:
     value = config_get(config, *keys, default=default)
     try:
         return int(value)
@@ -25,7 +38,9 @@ def config_int(config: dict[str, Any], *keys: str, default: int = 0) -> int:
         return default
 
 
-def config_float(config: dict[str, Any], *keys: str, default: float = 0.0) -> float:
+def config_float(
+    config: DoraConfig | Mapping[str, Any], *keys: str, default: float = 0.0
+) -> float:
     value = config_get(config, *keys, default=default)
     try:
         return float(value)
@@ -33,7 +48,9 @@ def config_float(config: dict[str, Any], *keys: str, default: float = 0.0) -> fl
         return default
 
 
-def config_optional_positive_int(config: dict[str, Any], *keys: str) -> int | None:
+def config_optional_positive_int(
+    config: DoraConfig | Mapping[str, Any], *keys: str
+) -> int | None:
     raw = config_get(config, *keys)
     if raw is None or str(raw).strip() == "":
         return None

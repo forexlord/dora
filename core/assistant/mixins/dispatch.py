@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from core import console_ui
 from core.intent import DEFAULT_VOLUME_STEP_PERCENT
 from core.intent.constants import VALID_CLARIFY_PENDING
-from core.intent.rules import _ACTION_VERB_RE
+from core.intent.rules import ACTION_VERB_RE
 from core.intent.safety import strip_dialogue_markup
 from core.session import (
     build_chat_followup_context,
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
 
 
 class DispatchMixin:
+    """Mixin methods expect a host implementing :class:`~core.assistant.protocol.AssistantHost`."""
     def _build_followup_context(self, pending: dict[str, str]) -> str:
         return (
             "Context: Follow-up to your previous clarification question. "
@@ -53,12 +55,14 @@ class DispatchMixin:
             else None
         )
         norm = " ".join(strip_dialogue_markup(text).lower().split())
-        if _ACTION_VERB_RE.search(norm):
+        if ACTION_VERB_RE.search(norm):
             clear_chat_context(state)
         chat_ctx = (
             None
-            if state.pending_followup is not None or _ACTION_VERB_RE.search(norm)
-            else build_chat_followup_context(state, text)
+            if state.pending_followup is not None or ACTION_VERB_RE.search(norm)
+            else build_chat_followup_context(
+                state, text, max_turns=self._config.chat_memory_turns
+            )
         )
         intent = self._parser.parse(
             text,
@@ -80,7 +84,7 @@ class DispatchMixin:
             state.pending_followup = None
             clear_chat_context(state)
             ok, message = self._executor.shutdown(
-                require_confirmation=bool(self._config.get("confirm_shutdown", True)),
+                require_confirmation=self._config.confirm_shutdown,
                 confirm_fn=self._confirm_action,
             )
             self._print_result(message, "red" if ok else "yellow")
@@ -145,7 +149,9 @@ class DispatchMixin:
         if reply:
             console_ui.emit_reply(reply)
             self._speak_with_overlay(reply, state)
-            remember_chat_turn(state, text, reply)
+            remember_chat_turn(
+                state, text, reply, max_turns=self._config.chat_memory_turns
+            )
             extend(state)
         else:
             self._cant_help(extend, state)
@@ -171,7 +177,9 @@ class DispatchMixin:
         if reply:
             console_ui.emit_reply(reply)
             self._speak_with_overlay(reply, state)
-            remember_chat_turn(state, text, reply)
+            remember_chat_turn(
+                state, text, reply, max_turns=self._config.chat_memory_turns
+            )
             extend(state)
             return
         self._cant_help(extend, state)
@@ -190,7 +198,9 @@ class DispatchMixin:
             console_ui.emit_reply(reply)
             self._speak_with_overlay(reply, state)
             state.pending_followup = {"reply": reply, "pending": pending}
-            remember_chat_turn(state, "", reply)
+            remember_chat_turn(
+                state, "", reply, max_turns=self._config.chat_memory_turns
+            )
             extend(state)
         else:
             state.pending_followup = None

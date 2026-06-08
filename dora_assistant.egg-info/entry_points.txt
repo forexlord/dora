@@ -1,3 +1,0 @@
-[console_scripts]
-dora = core.cli:main
-dora-background = core.cli:main_background

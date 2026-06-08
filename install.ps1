@@ -8,15 +8,15 @@
   downloads the Vosk speech model and local GGUF language model, sets DORA_HOME,
   and creates Desktop + Start Menu shortcuts.
 
-.PARAMETER AddToStartup
-  Also register Dora to start at Windows sign-in (background).
+.PARAMETER NoStartup
+  Skip registering Dora to start at Windows sign-in (background).
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File install.ps1
-  powershell -ExecutionPolicy Bypass -File install.ps1 -AddToStartup
+  powershell -ExecutionPolicy Bypass -File install.ps1 -NoStartup
 #>
 param(
-    [switch]$AddToStartup
+    [switch]$NoStartup
 )
 
 $ErrorActionPreference = "Stop"
@@ -133,18 +133,6 @@ function Resolve-InstallSourceDir {
     }
 
     if ($appPath -and ($scriptPath -eq $appPath)) {
-        $alternates = @(
-            (Join-Path $env:USERPROFILE "Documents\projects\voice-assistant"),
-            (Join-Path $env:USERPROFILE "Documents\projects\dora"),
-            (Join-Path $env:USERPROFILE "source\repos\voice-assistant"),
-            (Join-Path $env:USERPROFILE "source\repos\dora")
-        )
-        foreach ($alt in $alternates) {
-            if (Test-DoraSourceDir $alt) {
-                Write-Host "  Found newer source on this PC: $alt" -ForegroundColor Green
-                return (Resolve-Path $alt).Path
-            }
-        }
         if (Test-DoraSourceDir $AppDir) {
             Write-Host "  Updating installed copy (AI stack already present)." -ForegroundColor Green
             return $scriptPath
@@ -284,12 +272,15 @@ New-Shortcut -TargetPath (Join-Path $AppDir "venv\Scripts\dora-background.exe") 
     -WorkingDirectory $AppDir -ShortcutPath (Join-Path $startMenu "Dora (background).lnk") `
     -Description "Dora voice assistant (no window)"
 
-if ($AddToStartup) {
+if (-not $NoStartup) {
     Write-Step "Registering sign-in startup"
     $env:DORA_HOME = $AppDir
     Push-Location $AppDir
     try {
         & $DoraExe --install-startup
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  WARNING: Could not register sign-in startup. Run: $DoraExe --install-startup" -ForegroundColor Yellow
+        }
     } finally {
         Pop-Location
     }
@@ -304,9 +295,11 @@ Write-Host @"
   Desktop shortcut:  Dora
   Logs:              $InstallRoot\dora.log (after first run)
 
-  Double-click "Dora" on your desktop, or run:
+  Dora starts in the background when you sign in to Windows.
+  You can also double-click "Dora" on your desktop, or run:
     $launchBat
 
   Say "Dora" or "hey Dora" when you hear the ready message.
+  To disable sign-in startup: $DoraExe --uninstall-startup
 
 "@ -ForegroundColor Green

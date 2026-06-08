@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import zipfile
 from pathlib import Path
 from urllib.request import urlopen
@@ -18,19 +19,28 @@ DEFAULT_LLM_URL = (
 )
 DEFAULT_LLM_PATH = "models/Phi-3-mini-4k-instruct-Q4_K_M.gguf"
 _MIN_GGUF_BYTES = 50_000_000
+logger = logging.getLogger("dora.bootstrap")
 
 
-def llm_model_path_from_config(config: dict) -> str:
-    path = str(config.get("llm_model_path", "")).strip()
+def llm_model_path_from_config(config: dict | object) -> str:
+    from core.config import DoraConfig
+
+    if isinstance(config, DoraConfig):
+        path = config.llm_model_path.strip()
+    else:
+        path = str(config.get("llm_model_path", "")).strip()  # type: ignore[union-attr]
     if path:
         return path
     return DEFAULT_LLM_PATH
 
 
 def config_use_llm_fallback(config: dict) -> bool:
-    if "use_llm_fallback" in config:
-        return bool(config["use_llm_fallback"])
-    return bool(config.get("use_ollama_fallback", True))
+    from core.config import DoraConfig, migrate_legacy_keys
+
+    if isinstance(config, DoraConfig):
+        return config.use_llm_fallback
+    data = migrate_legacy_keys(config)
+    return bool(data.get("use_llm_fallback", True))
 
 
 def ensure_runtime_files() -> None:
@@ -129,16 +139,18 @@ def ensure_llm_model(config: dict) -> tuple[bool, str]:
     if _valid_gguf_file(model_path):
         return True, f"Language model ready: {model_path}"
 
-    auto = config.get("auto_download_llm_model")
-    if auto is None:
-        auto = config.get("auto_pull_ollama_model", True)
+    from core.config import DoraConfig, migrate_legacy_keys
+
+    raw = config.to_dict() if isinstance(config, DoraConfig) else config
+    data = migrate_legacy_keys(raw)
+    auto = data.get("auto_download_llm_model", True)
     if not bool(auto):
         return (
             False,
             f"GGUF model not found at {model_path} and auto_download_llm_model is disabled.",
         )
 
-    model_url = str(config.get("llm_model_url", DEFAULT_LLM_URL)).strip()
+    model_url = str(data.get("llm_model_url", DEFAULT_LLM_URL)).strip()
     if not model_url:
         return False, "No llm_model_url configured for download."
 
@@ -161,10 +173,7 @@ def ensure_llm_model(config: dict) -> tuple[bool, str]:
                         mb = downloaded // (1024 * 1024)
                         if mb >= last_mb + 50:
                             pct = min(100, int(100 * downloaded / total))
-                            print(
-                                f"  … downloaded {mb} MB ({pct}%)",
-                                flush=True,
-                            )
+                            logger.info("Downloaded %s MB (%s%%)", mb, pct)
                             last_mb = mb
         tmp_path.replace(model_path)
     except Exception as exc:

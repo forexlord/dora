@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .rules import _ACTION_VERB_RE
+from .rules import ACTION_VERB_RE
 
 
 def should_use_model_chat(normalized: str) -> bool:
@@ -16,4 +16,4 @@ def should_use_model_chat(normalized: str) -> bool:
     n = normalized.strip()
     if not n:
         return False
-    return _ACTION_VERB_RE.search(n) is None
+    return ACTION_VERB_RE.search(n) is None

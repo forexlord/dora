@@ -10,9 +10,11 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.config import DoraConfig, config_to_runtime_dict
 from core.win_subprocess import popen_no_console
 
 DEFAULT_LLAMA_RELEASE = "b9509"
@@ -26,14 +28,120 @@ DEFAULT_LLAMA_ZIP_URL_ARM64 = (
 )
 DEFAULT_LLAMA_TOOLS_DIR = "tools/llama-cpp"
 
-_server_proc: Any = None
-_server_port: int | None = None
-_server_model: str | None = None
-_last_error: str | None = None
+
+@dataclass
+class LlamaServerManager:
+    """Owns the llama-server child process and last error state."""
+
+    proc: Any = None
+    port: int | None = None
+    model: str | None = None
+    last_error: str | None = field(default=None, repr=False)
+
+    def stop(self) -> None:
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=10)
+            except Exception:
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+        self.proc = None
+        self.port = None
+        self.model = None
+
+    def start(
+        self,
+        config: DoraConfig | dict[str, Any],
+        model_path: str,
+        *,
+        port: int | None = None,
+        startup_timeout_sec: int = 600,
+    ) -> bool:
+        cfg = config_to_runtime_dict(config) if not isinstance(config, dict) else config
+        exe = resolve_llama_server_exe(cfg)
+        if exe is None:
+            self.last_error = "llama-server.exe not found. Re-run Install-Dora.bat to download tools."
+            return False
+
+        model = str(Path(model_path).expanduser().resolve())
+        if not Path(model).is_file():
+            self.last_error = f"GGUF model not found: {model}"
+            return False
+
+        listen_port = int(port or cfg.get("llama_server_port", 8765))
+        if (
+            self.proc is not None
+            and self.proc.poll() is None
+            and self.port == listen_port
+            and self.model == model
+            and _health_ok(listen_port)
+        ):
+            self.last_error = None
+            return True
+
+        self.stop()
+
+        n_ctx = int(cfg.get("llm_n_ctx", 4096))
+        threads = int(cfg.get("llm_n_threads", 0))
+        thread_arg = str(threads if threads > 0 else max(1, (os.cpu_count() or 4)))
+
+        cmd = [
+            str(exe),
+            "-m",
+            model,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(listen_port),
+            "--log-disable",
+            "-c",
+            str(n_ctx),
+            "-t",
+            thread_arg,
+        ]
+        try:
+            self.proc = popen_no_console(
+                cmd,
+                cwd=str(exe.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            self.last_error = f"Failed to start llama-server: {exc}"
+            return False
+
+        self.port = listen_port
+        self.model = model
+
+        deadline = time.time() + max(60, int(startup_timeout_sec))
+        while time.time() < deadline:
+            if self.proc.poll() is not None:
+                self.last_error = "llama-server exited during startup."
+                return False
+            if _health_ok(listen_port):
+                self.last_error = None
+                return True
+            time.sleep(1.0)
+
+        self.last_error = (
+            "llama-server did not become ready in time (large model on CPU can take several minutes)."
+        )
+        return False
+
+
+_manager = LlamaServerManager()
+atexit.register(_manager.stop)
+
+
+def get_llama_server_manager() -> LlamaServerManager:
+    return _manager
 
 
 def last_server_error() -> str | None:
-    return _last_error
+    return _manager.last_error
 
 
 def default_llama_zip_url() -> str:
@@ -43,8 +151,9 @@ def default_llama_zip_url() -> str:
     return DEFAULT_LLAMA_ZIP_URL_X64
 
 
-def llama_tools_dir_from_config(config: dict) -> Path:
-    return Path(str(config.get("llama_tools_dir", DEFAULT_LLAMA_TOOLS_DIR)))
+def llama_tools_dir_from_config(config: DoraConfig | dict[str, Any]) -> Path:
+    cfg = config_to_runtime_dict(config) if not isinstance(config, dict) else config
+    return Path(str(cfg.get("llama_tools_dir", DEFAULT_LLAMA_TOOLS_DIR)))
 
 
 def find_llama_executable(tools_dir: Path, names: tuple[str, ...]) -> Path | None:
@@ -54,30 +163,32 @@ def find_llama_executable(tools_dir: Path, names: tuple[str, ...]) -> Path | Non
         direct = tools_dir / name
         if direct.is_file():
             return direct
-    for path in tools_dir.rglob(name):
-        if path.is_file():
-            return path
+        for path in tools_dir.rglob(name):
+            if path.is_file():
+                return path
     return None
 
 
-def resolve_llama_server_exe(config: dict) -> Path | None:
-    custom = str(config.get("llama_server_exe", "")).strip()
+def resolve_llama_server_exe(config: DoraConfig | dict[str, Any]) -> Path | None:
+    cfg = config_to_runtime_dict(config) if not isinstance(config, dict) else config
+    custom = str(cfg.get("llama_server_exe", "")).strip()
     if custom:
         p = Path(custom).expanduser()
         return p if p.is_file() else None
-    tools = llama_tools_dir_from_config(config)
+    tools = llama_tools_dir_from_config(cfg)
     return find_llama_executable(tools, ("llama-server.exe", "llama-server"))
 
 
-def ensure_llama_tools(config: dict) -> tuple[bool, str]:
-    tools_dir = llama_tools_dir_from_config(config)
-    if resolve_llama_server_exe(config) is not None:
+def ensure_llama_tools(config: DoraConfig | dict[str, Any]) -> tuple[bool, str]:
+    cfg = config_to_runtime_dict(config) if not isinstance(config, dict) else config
+    tools_dir = llama_tools_dir_from_config(cfg)
+    if resolve_llama_server_exe(cfg) is not None:
         return True, f"llama.cpp tools ready at: {tools_dir}"
 
-    if not bool(config.get("auto_download_llama_tools", True)):
+    if not bool(cfg.get("auto_download_llama_tools", True)):
         return False, f"llama.cpp tools not found in {tools_dir} and auto download is disabled."
 
-    url = str(config.get("llama_tools_url", "")).strip() or default_llama_zip_url()
+    url = str(cfg.get("llama_tools_url", "")).strip() or default_llama_zip_url()
     tools_dir.mkdir(parents=True, exist_ok=True)
     zip_path = tools_dir / "llama-tools-download.zip"
 
@@ -102,7 +213,7 @@ def ensure_llama_tools(config: dict) -> tuple[bool, str]:
     finally:
         zip_path.unlink(missing_ok=True)
 
-    exe = resolve_llama_server_exe(config)
+    exe = resolve_llama_server_exe(cfg)
     if exe is None:
         return False, f"Download finished but llama-server.exe was not found under {tools_dir}"
     return True, f"Downloaded llama.cpp tools to: {tools_dir}"
@@ -117,103 +228,21 @@ def _health_ok(port: int) -> bool:
 
 
 def stop_llama_server() -> None:
-    global _server_proc, _server_port, _server_model
-    if _server_proc is not None and _server_proc.poll() is None:
-        try:
-            _server_proc.terminate()
-            _server_proc.wait(timeout=10)
-        except Exception:
-            try:
-                _server_proc.kill()
-            except Exception:
-                pass
-    _server_proc = None
-    _server_port = None
-    _server_model = None
-
-
-atexit.register(stop_llama_server)
+    _manager.stop()
 
 
 def start_llama_server(
-    config: dict,
+    config: DoraConfig | dict[str, Any],
     model_path: str,
     *,
     port: int | None = None,
     startup_timeout_sec: int = 600,
 ) -> bool:
-    global _server_proc, _server_port, _server_model, _last_error
-
-    exe = resolve_llama_server_exe(config)
-    if exe is None:
-        _last_error = "llama-server.exe not found. Re-run Install-Dora.bat to download tools."
-        return False
-
-    model = str(Path(model_path).expanduser().resolve())
-    if not Path(model).is_file():
-        _last_error = f"GGUF model not found: {model}"
-        return False
-
-    listen_port = int(port or config.get("llama_server_port", 8765))
-    if (
-        _server_proc is not None
-        and _server_proc.poll() is None
-        and _server_port == listen_port
-        and _server_model == model
-        and _health_ok(listen_port)
-    ):
-        _last_error = None
-        return True
-
-    stop_llama_server()
-
-    n_ctx = int(config.get("llm_n_ctx", 4096))
-    threads = int(config.get("llm_n_threads", 0))
-    thread_arg = str(threads if threads > 0 else max(1, (os.cpu_count() or 4)))
-
-    cmd = [
-        str(exe),
-        "-m",
-        model,
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(listen_port),
-        "--log-disable",
-        "-c",
-        str(n_ctx),
-        "-t",
-        thread_arg,
-    ]
-    try:
-        _server_proc = popen_no_console(
-            cmd,
-            cwd=str(exe.parent),
-            stdout=subprocess.DEVNULL,  # type: ignore[name-defined]
-            stderr=subprocess.DEVNULL,  # type: ignore[name-defined]
-        )
-    except Exception as exc:
-        _last_error = f"Failed to start llama-server: {exc}"
-        return False
-
-    _server_port = listen_port
-    _server_model = model
-
-    deadline = time.time() + max(60, int(startup_timeout_sec))
-    while time.time() < deadline:
-        if _server_proc.poll() is not None:
-            _last_error = "llama-server exited during startup."
-            return False
-        if _health_ok(listen_port):
-            _last_error = None
-            return True
-        time.sleep(1.0)
-
-    _last_error = "llama-server did not become ready in time (large model on CPU can take several minutes)."
-    return False
+    return _manager.start(
+        config, model_path, port=port, startup_timeout_sec=startup_timeout_sec
+    )
 
 
-# subprocess only imported for DEVNULL
 def _post_json(port: int, path: str, body: dict[str, Any], timeout: int = 180) -> dict[str, Any] | None:
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
@@ -225,7 +254,7 @@ def _post_json(port: int, path: str, body: dict[str, Any], timeout: int = 180) -
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
             return json.loads(resp.read().decode("utf-8"))
-    except Exception:
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
         return None
 
 
@@ -274,9 +303,10 @@ def text_completion(
     return str(data.get("content", "")).strip() or None
 
 
-def probe_server_load(config: dict, model_path: str) -> tuple[bool, str]:
-    port = int(config.get("llama_server_port", 8765))
-    if not start_llama_server(config, model_path, port=port, startup_timeout_sec=600):
+def probe_server_load(config: DoraConfig | dict[str, Any], model_path: str) -> tuple[bool, str]:
+    cfg = config_to_runtime_dict(config) if not isinstance(config, dict) else config
+    port = int(cfg.get("llama_server_port", 8765))
+    if not start_llama_server(cfg, model_path, port=port, startup_timeout_sec=600):
         return False, last_server_error() or "Could not start llama-server."
     out = chat_completion(
         port,

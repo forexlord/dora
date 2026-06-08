@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 
 class OverlayMixin:
+    """Mixin methods expect a host implementing :class:`~core.assistant.protocol.AssistantHost`."""
     def _on_speech_pause_processing(self) -> None:
         if not self._show_processing_on_speech_pause or self._overlay_user_hidden:
             return
@@ -32,11 +33,11 @@ class OverlayMixin:
 
     def _announce_ready(self, begin_overlay_hidden: bool) -> None:
         """After boot (especially background), tell the user Dora is listening."""
-        if not bool(self._config.get("announce_ready_at_startup", True)):
+        if not self._config.announce_ready_at_startup:
             return
         if self._listener is None:
             return
-        msg = str(self._config.get("ready_message", "")).strip()
+        msg = self._config.ready_message.strip()
         if not msg:
             msg = "Dora is ready. Say Dora or hey Dora when you need me."
         if begin_overlay_hidden and not self._overlay_user_hidden:

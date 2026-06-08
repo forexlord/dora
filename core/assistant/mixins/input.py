@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from core.intent.rules import is_session_end_phrase
 from core import console_ui
+from core.intent.rules import is_session_end_phrase
 from core.session import CONFIRM_HEARD, SESSION_END_TTS, clear_chat_context, heard_is_confirmation
 from core.wake_config import normalize_wake_hearing
 
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 
 class InputMixin:
+    """Mixin methods expect a host implementing :class:`~core.assistant.protocol.AssistantHost`."""
     def _normalize_wake_hearing(self, normalized: str) -> str:
         return normalize_wake_hearing(
             normalized, self._wake_phrases, self._wake_prefix_alts

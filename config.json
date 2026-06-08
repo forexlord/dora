@@ -27,6 +27,7 @@
   "voice_processing_grace_sec": 180,
   "voice_idle_timeout_sec": 10,
   "post_response_listen_window_sec": 10,
+  "chat_memory_turns": 4,
   "confirm_shutdown": true,
   "use_llm_fallback": true,
   "llm_fast_chat_path": true,
@@ -50,5 +51,5 @@
   "allow_text_fallback": true,
   "allow_chat_fallback": true,
   "auto_discover_apps": true,
-  "trust_mapped_apps": true
+  "trust_mapped_apps": false
 }

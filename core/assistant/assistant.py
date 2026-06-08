@@ -2,38 +2,30 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from pathlib import Path
-from typing import Any
 
 from core import console_ui
 from core.assistant.mixins.dispatch import DispatchMixin
 from core.assistant.mixins.input import InputMixin
 from core.assistant.mixins.overlay import OverlayMixin
 from core.assistant.mixins.startup import StartupMixin
-from core.bootstrap import (
-    config_use_llm_fallback,
-    ensure_runtime_files,
-    llm_model_path_from_config,
-)
-from core.config_helpers import (
-    config_bool,
-    config_float,
-    config_get,
-    config_int,
-    config_optional_positive_int,
-)
+from core.bootstrap import ensure_runtime_files, llm_model_path_from_config
+from core.config import DoraConfig, config_to_runtime_dict, load_dora_config
 from core.executor import CommandExecutor
 from core.intent import IntentParser
 from core.listener import VoiceListener, WhisperVoiceListener
 from core.llama_server import stop_llama_server
-from core.paths import load_json, resolve_working_directory
+from core.paths import resolve_working_directory
 from core.permissions import PermissionStore
 from core.session import SessionState
 from core.status_overlay import build_status_overlay
 from core.tts import TextToSpeech
 from core.wake_config import build_wake_prefix_aliases, parse_wake_phrases
+
+logger = logging.getLogger("dora.assistant")
 
 
 class DoraAssistant(
@@ -49,7 +41,7 @@ class DoraAssistant(
 
     def __init__(
         self,
-        config: dict[str, Any],
+        config: DoraConfig,
         *,
         config_path: str | Path = "config.json",
         apps_dir: str | Path = "apps",
@@ -57,74 +49,55 @@ class DoraAssistant(
         self._config = config
         self._config_path = Path(config_path)
         self._permission_store = PermissionStore("permissions.json")
-        self._use_llm = config_use_llm_fallback(config)
-        self._allow_chat_fallback = config_bool(config, "allow_chat_fallback", default=True)
-        llm_ctx = config_optional_positive_int(config, "llm_n_ctx", "ollama_num_ctx")
+        self._use_llm = config.use_llm_fallback
+        self._allow_chat_fallback = config.allow_chat_fallback
         self._parser = IntentParser(
             model_path=llm_model_path_from_config(config),
-            config=config,
+            config=config_to_runtime_dict(config),
             use_llm_fallback=self._use_llm,
-            num_predict_resolve=config_int(
-                config, "llm_num_predict_resolve", "ollama_num_predict_resolve", default=56
-            ),
-            num_predict_chat=config_int(
-                config, "llm_num_predict_chat", "ollama_num_predict_chat", default=72
-            ),
-            temperature_resolve=config_float(
-                config, "llm_temperature_resolve", "ollama_temperature_resolve", default=0.0
-            ),
-            n_ctx=llm_ctx,
-            n_threads=config_int(config, "llm_n_threads", default=0),
-            fast_chat_path=config_bool(
-                config, "llm_fast_chat_path", "ollama_fast_chat_path", default=True
-            ),
+            num_predict_resolve=config.llm_num_predict_resolve,
+            num_predict_chat=config.llm_num_predict_chat,
+            temperature_resolve=config.llm_temperature_resolve,
+            n_ctx=config.llm_n_ctx_or_none(),
+            n_threads=config.llm_n_threads,
+            fast_chat_path=config.llm_fast_chat_path,
             allow_chat=self._allow_chat_fallback,
         )
         self._tts = TextToSpeech(
-            enabled=config_bool(config, "speak_responses", default=True),
-            rate=config_int(config, "tts_rate", default=0),
-            volume=config_int(config, "tts_volume", default=70),
-            preferred_voice=str(config_get(config, "tts_voice", default="zira")),
+            enabled=config.speak_responses,
+            rate=config.tts_rate,
+            volume=config.tts_volume,
+            preferred_voice=config.tts_voice,
         )
         self._executor = CommandExecutor(
             permission_store=self._permission_store,
             apps_dir=apps_dir,
-            auto_discover_apps=config_bool(config, "auto_discover_apps", default=True),
-            trust_mapped_apps=config_bool(config, "trust_mapped_apps", default=True),
+            auto_discover_apps=config.auto_discover_apps,
+            trust_mapped_apps=config.trust_mapped_apps,
         )
         self._listener: VoiceListener | WhisperVoiceListener | None = None
-        self._wake_word_enabled = config_bool(config, "wake_word_enabled", default=True)
+        self._wake_word_enabled = config.wake_word_enabled
         self._wake_phrases, self._wake_hint = parse_wake_phrases(config)
         self._wake_prefix_alts = build_wake_prefix_aliases(self._wake_phrases, config)
-        self._voice_session_after_wake_sec = config_int(
-            config, "voice_session_after_wake_sec", "wake_word_timeout_sec", default=120
-        )
-        self._voice_processing_grace_sec = config_int(config, "voice_processing_grace_sec", default=180)
-        self._post_response_listen_window_sec = config_int(
-            config, "post_response_listen_window_sec", default=10
-        )
-        self._voice_idle_timeout_sec = config_float(config, "voice_idle_timeout_sec", default=10.0)
-        self._text_fallback_enabled = config_bool(config, "allow_text_fallback", default=True)
-        self._warmup_llm_on_start = config_bool(
-            config, "warmup_llm_on_start", "warmup_ollama_on_start", default=True
-        )
+        self._voice_session_after_wake_sec = config.voice_session_after_wake_sec
+        self._voice_processing_grace_sec = config.voice_processing_grace_sec
+        self._post_response_listen_window_sec = config.post_response_listen_window_sec
+        self._voice_idle_timeout_sec = config.voice_idle_timeout_sec
+        self._text_fallback_enabled = config.allow_text_fallback
+        self._warmup_llm_on_start = config.warmup_llm_on_start
         self._llm_ready = False
-        self._idle_rms_threshold = config_float(config, "vosk_idle_rms_threshold", default=550.0)
-        self._echo_listen_status = not config_bool(config, "show_status_overlay", default=True)
+        self._idle_rms_threshold = config.vosk_idle_rms_threshold
+        self._echo_listen_status = not config.show_status_overlay
         console_ui.configure(verbose_voice=self._echo_listen_status)
-        self._show_processing_on_speech_pause = config_bool(
-            config, "show_processing_on_speech_pause", default=True
-        )
-        self._speech_pause_to_processing_sec = config_float(
-            config, "speech_pause_to_processing_sec", default=0.55
-        )
+        self._show_processing_on_speech_pause = config.show_processing_on_speech_pause
+        self._speech_pause_to_processing_sec = config.speech_pause_to_processing_sec
         self._startup_complete = False
         self._overlay_user_hidden = False
         self._user_cancelled = False
         self._cancel_event = threading.Event()
         self._session: SessionState | None = None
         self._overlay = build_status_overlay(
-            config_bool(config, "show_status_overlay", default=True),
+            config.show_status_overlay,
             self._wake_hint,
             on_user_dismiss=self._on_overlay_user_dismiss,
         )
@@ -141,7 +114,7 @@ class DoraAssistant(
         if sess is not None:
             sess.wake_armed_until = 0.0
             sess.pending_followup = None
-            sess.chat_context = None
+            sess.chat_turns.clear()
 
     def run(self) -> None:
         self._overlay.start(begin_hidden=False)
@@ -174,7 +147,8 @@ class DoraAssistant(
                 except KeyboardInterrupt:
                     console_ui.emit("\nStopping Dora", style="bold")
                     break
-                except Exception as exc:  # pragma: no cover
+                except Exception as exc:
+                    logger.exception("Unhandled error in main loop")
                     console_ui.emit(f"Error: {exc}", style="red")
         finally:
             self._session = None
@@ -206,8 +180,9 @@ def run_assistant() -> None:
 
     ensure_runtime_files()
     try:
-        config = load_json("config.json")
+        config = load_dora_config(cfg_path)
     except Exception as exc:
+        logger.exception("Failed to load config from %s", cfg_path)
         console_ui.emit(f"Startup failed: {exc}", style="bold red")
         return
-    DoraAssistant(config, apps_dir=work / "apps").run()
+    DoraAssistant(config, config_path=cfg_path, apps_dir=work / "apps").run()

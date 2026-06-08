@@ -6,8 +6,8 @@ import math
 import queue
 import threading
 import tkinter as tk
-from tkinter import font as tkfont
 from collections.abc import Callable
+from tkinter import font as tkfont
 from typing import Any
 
 _HEADLINES: dict[str, str] = {

@@ -10,7 +10,7 @@ from .constants import REFUSAL_REPLY, SHELL_LIKE_WORDS
 from .conversational import should_use_model_chat
 from .llm_client import GgufIntentBackend, last_llama_load_error
 from .rules import (
-    _ACTION_VERB_RE,
+    ACTION_VERB_RE,
     is_capabilities_question,
     parse_battery_status_intent,
     parse_identity_intent,
@@ -101,7 +101,7 @@ class IntentParser:
         llm_context = self._merge_llm_context(follow_up_context, chat_followup_context)
         caps_question = is_capabilities_question(normalized)
         use_model_chat = should_use_model_chat(normalized) or (
-            bool(chat_followup_context) and not _ACTION_VERB_RE.search(normalized)
+            bool(chat_followup_context) and not ACTION_VERB_RE.search(normalized)
         )
 
         if (

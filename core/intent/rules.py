@@ -11,8 +11,8 @@ from .constants import (
     DEFAULT_VOLUME_STEP_PERCENT,
     FORCE_CLOSE_WORDS,
     OPEN_WORDS,
-    SHUTDOWN_WORDS,
     SHELL_LIKE_WORDS,
+    SHUTDOWN_WORDS,
 )
 
 
@@ -214,11 +214,22 @@ _CAPABILITIES_LOOSE_RE = re.compile(
     re.IGNORECASE,
 )
 
+ACTION_VERB_RE = re.compile(
+    r"\b("
+    r"open|close|launch|start|run|load|kill|shutdown|shut\s*down|"
+    r"mute[ds]?|muting|unmute|"
+    r"volume|brightness|wifi|hotspot|louder|quieter|brighter|dimmer|dim|"
+    r"increase|decrease|set|turn\s+on|turn\s+off|force\s+close|force\s+quit|"
+    r"force\s+kill|hard\s+close"
+    r")\b",
+    re.IGNORECASE,
+)
+
 
 def is_capabilities_question(normalized: str) -> bool:
     """User is asking what Dora can do (including garbled wake/STT)."""
     n = normalized.strip()
-    if not n or _ACTION_VERB_RE.search(n):
+    if not n or ACTION_VERB_RE.search(n):
         return False
     if n in SHELL_LIKE_WORDS:
         return True
@@ -237,17 +248,6 @@ def parse_identity_intent(normalized: str) -> dict[str, Any] | None:
         return {"type": "chat", "reply": DORA_NAME_REPLY}
     return None
 
-
-_ACTION_VERB_RE = re.compile(
-    r"\b("
-    r"open|close|launch|start|run|load|kill|shutdown|shut\s*down|"
-    r"mute[ds]?|muting|unmute|"
-    r"volume|brightness|wifi|hotspot|louder|quieter|brighter|dimmer|dim|"
-    r"increase|decrease|set|turn\s+on|turn\s+off|force\s+close|force\s+quit|"
-    r"force\s+kill|hard\s+close"
-    r")\b",
-    re.IGNORECASE,
-)
 
 _SESSION_END_EXACT: frozenset[str] = frozenset(
     {
@@ -312,7 +312,7 @@ def parse_quick_chat_intent(normalized: str) -> dict[str, Any] | None:
     so phrasing like \"no open chrome\" still falls through to rules or the LLM.
     """
     n = normalized.strip()
-    if not n or _ACTION_VERB_RE.search(n):
+    if not n or ACTION_VERB_RE.search(n):
         return None
 
     for phrase in _QUICK_DISMISS_PHRASES:

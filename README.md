@@ -29,16 +29,13 @@ You can also re-run **`Install-Dora.bat`** from the installed folder later; the 
 
 Say **“Dora”** when you hear that Dora is ready.
 
-### Optional: start when you sign in to Windows
-
-Run the installer again from an **Administrator** or normal PowerShell window:
+**Dora starts in the background when you sign in to Windows** (no need to open the desktop shortcut every time). To turn that off:
 
 ```powershell
-cd "C:\path\to\extracted\Dora"
-powershell -ExecutionPolicy Bypass -File install.ps1 -AddToStartup
+& "$env:LOCALAPPDATA\Dora\app\venv\Scripts\dora.exe" --uninstall-startup
 ```
 
-Or after install:
+To re-enable sign-in startup:
 
 ```powershell
 & "$env:LOCALAPPDATA\Dora\app\venv\Scripts\dora.exe" --install-startup
@@ -132,7 +129,45 @@ Install [Python 3.10+](https://www.python.org/downloads/) and check **“Add Pyt
 
 ---
 
-## For developers (optional)
+## Permissions (automatic — users do not edit this)
+
+Dora creates `permissions.json` automatically. By default (`trust_mapped_apps: false`), Dora asks once by voice before opening each new app, then remembers your choice in `permissions.json`. You never need to edit that file by hand.
+
+Set `trust_mapped_apps: true` in `config.json` only if you want apps found on your PC to open without that first voice confirmation (less strict, more convenient).
+
+## Optional: Whisper speech engine
+
+Default STT is Vosk (offline, included in the installer). For Whisper instead:
+
+```powershell
+pip install -e ".[whisper]"
+```
+
+Then set `"stt_engine": "whisper"` in `config.json`.
+
+## For developers
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture, mixin contracts, and PR guidelines.
+
+```powershell
+pip install -e ".[dev]"
+pytest
+ruff check core tests
+mypy core
+```
+
+Configuration is typed in `core/config.py` (`DoraConfig`). Unknown keys are logged and ignored; invalid values fail at startup. Legacy `ollama_*` keys are migrated automatically.
+
+Key settings:
+
+| Key | Purpose |
+|-----|---------|
+| `wake_word` / `wake_phrases` | Wake detection |
+| `chat_memory_turns` | Multi-turn chat context (default 4) |
+| `trust_mapped_apps` | `false` = voice confirm per new app (default); `true` = auto-allow discovered apps |
+| `stt_engine` | `vosk` (default) or `whisper` |
+| `llm_model_path` | Local GGUF file |
+| `warmup_llm_on_start` | Pre-load model at startup |
 
 If you work on the source repo with git:
 
@@ -161,7 +196,7 @@ Create a ZIP of the repo **without** `venv/`, `models/`, `.git/`, then attach to
 
 ## License
 
-Add your license before publishing (e.g. MIT).
+MIT — see [LICENSE](LICENSE).
 
 ---
 

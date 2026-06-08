@@ -109,9 +109,16 @@ def main() -> None:
     if "--uninstall-startup" in sys.argv:
         _cli_uninstall_startup()
 
+    background = os.environ.get("DORA_BACKGROUND") == "1"
     _configure_background_stdio()
-    if os.environ.get("DORA_BACKGROUND") != "1":
+    if not background:
         _configure_foreground_log()
+
+    from core.logging_config import setup_logging
+    from core.platform_check import require_windows
+
+    require_windows()
+    setup_logging(background=background)
 
     from core.application import run_assistant
 

@@ -30,6 +30,15 @@ def _pythonw() -> Path:
     return cand if cand.is_file() else exe
 
 
+def _background_launcher(dora_home: Path) -> tuple[Path, str]:
+    """Installed venv entry point, else pythonw -m core.cli (dev)."""
+    bg = dora_home / "venv" / "Scripts" / "dora-background.exe"
+    if bg.is_file():
+        return bg, ""
+    pyw = _pythonw()
+    return pyw, " -m core.cli"
+
+
 def _ps_single_quoted(s: str) -> str:
     return "'" + s.replace("'", "''") + "'"
 
@@ -54,15 +63,15 @@ def install_user_startup(dora_home: Path | None = None) -> tuple[bool, str]:
 
     bundle = _bundle_dir()
     bundle.mkdir(parents=True, exist_ok=True)
-    pyw = _pythonw()
+    launcher, launcher_args = _background_launcher(home)
     dh = str(home).replace('"', '""')
-    pw = str(pyw).replace('"', '""')
+    lp = str(launcher).replace('"', '""')
     vbs = bundle / "DoraStart.vbs"
     vbs.write_text(
         "Set sh = CreateObject(\"WScript.Shell\")\n"
         f"sh.Environment(\"Process\")(\"DORA_HOME\") = \"{dh}\"\n"
         'sh.Environment("Process")("DORA_BACKGROUND") = "1"\n'
-        f'cmd = Chr(34) & "{pw}" & Chr(34) & " -m core.cli"\n'
+        f'cmd = Chr(34) & "{lp}" & Chr(34) & "{launcher_args}"\n'
         "sh.Run cmd, 0, False\n",
         encoding="utf-8",
     )
@@ -112,7 +121,7 @@ def install_user_startup(dora_home: Path | None = None) -> tuple[bool, str]:
     return (
         True,
         "Dora will start in the background when you sign in to Windows.\n"
-        "Requires this Python environment to be installed (pip install -e . in this folder).\n"
+        f"  Launcher: {launcher}{launcher_args}\n"
         "If something goes wrong, open:\n"
         f"  {bundle / 'dora.log'}\n"
         f"  Launcher script: {vbs}\n"

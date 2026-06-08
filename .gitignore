@@ -6,4 +6,10 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 app_map.json
+permissions.json
+*.egg-info/
+Dora-windows.zip
+tools/

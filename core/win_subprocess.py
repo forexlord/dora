@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence, Union
+from typing import Any
 
-_Arg = Union[str, bytes, Path]
-Cmd = Union[Sequence[_Arg], str]
+_Arg = str | bytes | Path
+Cmd = Sequence[_Arg] | str
 
 
 def _creationflags_no_window() -> int:

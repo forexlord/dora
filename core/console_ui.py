@@ -58,3 +58,9 @@ def emit_thinking() -> None:
     if not _verbose_voice:
         return
     _console.print("Thinking…", style="dim")
+
+
+def emit_listen_prompt() -> None:
+    if not _verbose_voice:
+        return
+    _console.print("Listening... speak now.", style="cyan")
