@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -35,11 +36,17 @@ jobs:
 
       - name: Build Dora-windows.zip
         shell: pwsh
-        run: ./scripts/build-release-zip.ps1
+        run: |
+          ./scripts/build-release-zip.ps1
+          if (-not (Test-Path Dora-windows.zip)) {
+            throw "Dora-windows.zip was not created"
+          }
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          name: Dora ${{ github.ref_name }}
           files: Dora-windows.zip
           generate_release_notes: true
           draft: false

@@ -1,18 +1,39 @@
 # Maintainer: build Dora-windows.zip for GitHub Releases (no venv, no downloaded models).
 $ErrorActionPreference = "Stop"
-$Root = Split-Path $PSScriptRoot -Parent
+$Root = (Split-Path $PSScriptRoot -Parent).TrimEnd('\')
 $OutZip = Join-Path $Root "Dora-windows.zip"
-$Stage = Join-Path $env:TEMP "dora-release-stage"
+$Stage = Join-Path $Root ".release-stage"
 
 if (Test-Path $Stage) { Remove-Item $Stage -Recurse -Force }
 New-Item -ItemType Directory -Path $Stage | Out-Null
 
-$null = robocopy $Root $Stage /E /NFL /NDL /NJH /NJS /NC /NS /NP `
-    /XD venv .git __pycache__ .pytest_cache .mypy_cache .ruff_cache dora_assistant.egg-info models `
-    /XF Dora-windows.zip *.pyc *.pyo
-if ($LASTEXITCODE -gt 7) { throw "robocopy failed: $LASTEXITCODE" }
+try {
+    & robocopy $Root $Stage /E /NFL /NDL /NJH /NJS /NC /NS /NP `
+        /XD venv .git .release-stage __pycache__ .pytest_cache .mypy_cache .ruff_cache `
+        dora_assistant.egg-info models tools `
+        /XF Dora-windows.zip *.pyc *.pyo
+    $robocopyExit = $LASTEXITCODE
+    if ($robocopyExit -gt 7) {
+        throw "robocopy failed (exit $robocopyExit)"
+    }
 
-if (Test-Path $OutZip) { Remove-Item $OutZip -Force }
-Compress-Archive -Path (Join-Path $Stage "*") -DestinationPath $OutZip -Force
-Remove-Item $Stage -Recurse -Force
-Write-Host "Created: $OutZip" -ForegroundColor Green
+    $staged = Get-ChildItem -Path $Stage -Force
+    if (-not $staged) {
+        throw "Release stage is empty: $Stage"
+    }
+
+    if (Test-Path $OutZip) { Remove-Item $OutZip -Force }
+    Push-Location $Stage
+    try {
+        Compress-Archive -Path * -DestinationPath $OutZip -Force
+    } finally {
+        Pop-Location
+    }
+
+    if (-not (Test-Path $OutZip)) {
+        throw "Zip was not created: $OutZip"
+    }
+    Write-Host "Created: $OutZip ($((Get-Item $OutZip).Length) bytes)" -ForegroundColor Green
+} finally {
+    if (Test-Path $Stage) { Remove-Item $Stage -Recurse -Force -ErrorAction SilentlyContinue }
+}

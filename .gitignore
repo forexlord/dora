@@ -12,4 +12,5 @@ app_map.json
 permissions.json
 *.egg-info/
 Dora-windows.zip
+.release-stage/
 tools/
