@@ -8,11 +8,15 @@ if (Test-Path $Stage) { Remove-Item $Stage -Recurse -Force }
 New-Item -ItemType Directory -Path $Stage | Out-Null
 
 try {
+    # robocopy logs progress to stderr; do not treat that as a terminating error (CI uses pwsh).
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & robocopy $Root $Stage /E /NFL /NDL /NJH /NJS /NC /NS /NP `
         /XD venv .git .release-stage __pycache__ .pytest_cache .mypy_cache .ruff_cache `
         dora_assistant.egg-info models tools `
-        /XF Dora-windows.zip *.pyc *.pyo
+        /XF Dora-windows.zip *.pyc *.pyo 2>&1 | Out-Null
     $robocopyExit = $LASTEXITCODE
+    $ErrorActionPreference = $prevEap
     if ($robocopyExit -gt 7) {
         throw "robocopy failed (exit $robocopyExit)"
     }
