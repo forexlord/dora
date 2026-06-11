@@ -8,6 +8,9 @@ from typing import Any
 
 from core.config import DoraConfig
 
+# Accepted before "dora" when the wake phrase is two words (e.g. hey dora).
+HEY_WAKE_PREFIXES: frozenset[str] = frozenset({"hey", "hi", "hay", "haw"})
+
 DEFAULT_WAKE_PREFIX_ALIASES: frozenset[str] = frozenset(
     {
         "hey",
@@ -121,16 +124,15 @@ def parse_wake_phrases(config: DoraConfig | Mapping[str, Any]) -> tuple[list[str
     if isinstance(raw, list) and raw:
         phrases = [" ".join(str(x).lower().split()) for x in raw if str(x).strip()]
     else:
-        wake = str(data.get("wake_word", "dora")).strip().lower() or "dora"
+        wake = str(data.get("wake_word", "hey dora")).strip().lower() or "hey dora"
         phrases = [wake]
-        if wake in {"dora", "hey dora"} or wake.endswith(" dora"):
-            if "dora" not in phrases:
-                phrases.append("dora")
+        # Legacy: single-word "dora" still pairs with "hey dora" unless wake_phrases is set.
+        if wake == "dora":
             if "hey dora" not in phrases:
                 phrases.append("hey dora")
     phrases = [p for p in phrases if p.strip()]
     if not phrases:
-        phrases = ["dora", "hey dora"]
+        phrases = ["hey dora"]
     phrases = sorted(set(phrases), key=len, reverse=True)
 
     hint = str(data.get("wake_hint", "")).strip()
@@ -209,6 +211,13 @@ def is_filler_only(text: str) -> bool:
     return bool(tokens) and all(t in WAKE_POLITE_FILLERS for t in tokens)
 
 
+def _two_word_wake_prefixes(w0: str, prefix_alts: frozenset[str]) -> frozenset[str]:
+    """Narrow prefixes for multi-word wake — avoids 'can dora' false wakes."""
+    if w0 in HEY_WAKE_PREFIXES:
+        return HEY_WAKE_PREFIXES | {w0}
+    return frozenset({w0}) | (prefix_alts & HEY_WAKE_PREFIXES) | {w0}
+
+
 def rewrite_alias_to_two_word_phrase(
     normalized: str,
     w0: str,
@@ -216,7 +225,7 @@ def rewrite_alias_to_two_word_phrase(
     canonical: str,
     prefix_alts: frozenset[str],
 ) -> str:
-    """STT: a dora / oh dora → canonical two-word phrase (e.g. hey dora)."""
+    """STT: hi dora / hey doora → canonical two-word phrase (e.g. hey dora)."""
     if normalized == canonical or normalized.startswith(canonical + " "):
         return normalized
     tokens = normalized.split()
@@ -226,7 +235,8 @@ def rewrite_alias_to_two_word_phrase(
     t1 = tokens[1].rstrip(".,!?")
     if t1 != name.rstrip(".,!?"):
         return normalized
-    if t0 not in prefix_alts and t0 != w0:
+    allowed = _two_word_wake_prefixes(w0, prefix_alts)
+    if t0 not in allowed:
         return normalized
     rest = tokens[2:]
     return f"{canonical} {' '.join(rest)}".rstrip() if rest else canonical
@@ -263,9 +273,11 @@ def normalize_wake_hearing(
             text = rewrite_alias_to_two_word_phrase(
                 text, parts[0], parts[1], phrase, prefix_alts
             )
-    for phrase in wake_phrases:
-        if " " not in phrase:
-            text = rewrite_alias_to_single_name(text, phrase, prefix_alts)
+    has_single_word_wake = any(" " not in p for p in wake_phrases)
+    if has_single_word_wake:
+        for phrase in wake_phrases:
+            if " " not in phrase:
+                text = rewrite_alias_to_single_name(text, phrase, prefix_alts)
     return text
 
 

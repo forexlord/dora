@@ -40,15 +40,23 @@ class InputMixin:
             if was_armed:
                 state.wake_armed_until = time.time() + self._voice_processing_grace_sec
             idle_to_use = self._voice_idle_timeout_sec if was_armed else None
+            waiting_for_wake = (
+                self._wake_word_enabled
+                and bool(self._wake_phrases)
+                and not was_armed
+            )
             self._overlay_before_listen(state)
             use_pause_cb = self._show_processing_on_speech_pause and (
                 was_armed
                 or not (self._wake_word_enabled and self._wake_phrases)
             )
+            listen_rms = self._idle_rms_threshold
+            if waiting_for_wake:
+                listen_rms = self._idle_rms_threshold * self._wake_listen_rms_multiplier
             text = listener.listen_once(
                 idle_timeout_sec=idle_to_use,
-                echo_status=self._echo_listen_status,
-                idle_rms_threshold=self._idle_rms_threshold,
+                echo_status=self._echo_listen_status and was_armed,
+                idle_rms_threshold=listen_rms,
                 on_speech_pause=self._on_speech_pause_processing if use_pause_cb else None,
                 speech_pause_to_processing_sec=self._speech_pause_to_processing_sec,
                 cancel_event=self._cancel_event,
@@ -73,13 +81,15 @@ class InputMixin:
             raw_heard = text.strip()
             if self._config.show_heard_transcript and raw_heard:
                 console_ui.emit_heard(raw_heard)
-                if not self._overlay_user_hidden:
+                if was_armed and not self._overlay_user_hidden:
                     self._overlay.show()
                     self._set_overlay_phase("thinking", f'Heard: "{raw_heard[:100]}"')
             normalized_text = " ".join(raw_heard.lower().split())
             if self._wake_word_enabled and self._wake_phrases:
                 text = self._apply_wake_word_gate(raw_heard, normalized_text, state)
                 if text is None:
+                    if waiting_for_wake and not self._overlay_user_hidden:
+                        self._overlay.hide()
                     return None
             self._after_command_captured(text)
             return text

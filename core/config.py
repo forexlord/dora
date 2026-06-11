@@ -10,10 +10,16 @@ from typing import Any
 
 logger = logging.getLogger("dora.config")
 
-CONFIG_SCHEMA_VERSION = 4
+CONFIG_SCHEMA_VERSION = 5
 
 _DEFAULT_WHISPER_PROMPT_V4 = (
     "Dora, hey Dora, doora, adora. Wake word Dora. "
+    "Open Chrome. Open Brave. Open WhatsApp. Mute. Volume up. "
+    "What is my battery."
+)
+
+_DEFAULT_WHISPER_PROMPT_V5 = (
+    "Hey Dora. Wake phrase is hey Dora only. "
     "Open Chrome. Open Brave. Open WhatsApp. Mute. Volume up. "
     "What is my battery."
 )
@@ -88,6 +94,24 @@ def migrate_config_schema(raw: Mapping[str, Any]) -> tuple[dict[str, Any], bool]
         if not old_prompt or "doora" not in old_prompt.lower():
             data["whisper_initial_prompt"] = _DEFAULT_WHISPER_PROMPT_V4
             changed = True
+    if version < 5:
+        wake = str(data.get("wake_word", "dora")).strip().lower()
+        phrases = data.get("wake_phrases")
+        if not phrases or wake in {"dora", "hey dora"}:
+            data["wake_word"] = "hey dora"
+            data["wake_phrases"] = ["hey dora"]
+            changed = True
+        ready = str(data.get("ready_message", "")).strip()
+        if not ready or "hey Dora" not in ready:
+            data["ready_message"] = "Dora is ready. Say hey Dora when you need me."
+            changed = True
+        prompt = str(data.get("whisper_initial_prompt", "")).strip()
+        if not prompt or "hey Dora only" not in prompt:
+            data["whisper_initial_prompt"] = _DEFAULT_WHISPER_PROMPT_V5
+            changed = True
+        if "wake_listen_rms_multiplier" not in data:
+            data["wake_listen_rms_multiplier"] = 1.45
+            changed = True
     if version < CONFIG_SCHEMA_VERSION:
         data["config_schema_version"] = CONFIG_SCHEMA_VERSION
         changed = True
@@ -122,18 +146,17 @@ class DoraConfig:
     whisper_language: str = "en"
     whisper_end_silence_sec: float = 0.6
     whisper_max_utterance_sec: float = 12.0
-    whisper_initial_prompt: str = _DEFAULT_WHISPER_PROMPT_V4
+    whisper_initial_prompt: str = _DEFAULT_WHISPER_PROMPT_V5
     show_status_overlay: bool = True
     show_heard_transcript: bool = True
     wake_word_enabled: bool = True
-    wake_word: str = "dora"
-    wake_phrases: list[str] = field(default_factory=list)
+    wake_word: str = "hey dora"
+    wake_phrases: list[str] = field(default_factory=lambda: ["hey dora"])
     wake_prefix_aliases: list[str] = field(default_factory=list)
     wake_hint: str = ""
+    wake_listen_rms_multiplier: float = 1.45
     announce_ready_at_startup: bool = True
-    ready_message: str = (
-        "Dora is ready. Say Dora or hey Dora when you need me."
-    )
+    ready_message: str = "Dora is ready. Say hey Dora when you need me."
     voice_session_after_wake_sec: int = 120
     voice_processing_grace_sec: int = 180
     voice_idle_timeout_sec: float = 10.0

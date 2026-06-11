@@ -79,6 +79,7 @@ class DoraAssistant(
         self._wake_word_enabled = config.wake_word_enabled
         self._wake_phrases, self._wake_hint = parse_wake_phrases(config)
         self._wake_prefix_alts = build_wake_prefix_aliases(self._wake_phrases, config)
+        self._wake_listen_rms_multiplier = max(1.0, float(config.wake_listen_rms_multiplier))
         self._voice_session_after_wake_sec = config.voice_session_after_wake_sec
         self._voice_processing_grace_sec = config.voice_processing_grace_sec
         self._post_response_listen_window_sec = config.post_response_listen_window_sec

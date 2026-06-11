@@ -17,14 +17,16 @@
   "whisper_end_silence_sec": 0.6,
   "whisper_max_utterance_sec": 12,
   "whisper_idle_rms_threshold": 380,
-  "whisper_initial_prompt": "Dora, hey Dora, doora, adora. Wake word Dora. Open Chrome. Open Brave. Open WhatsApp. Mute. Volume up. What is my battery.",
+  "whisper_initial_prompt": "Hey Dora. Wake phrase is hey Dora only. Open Chrome. Open Brave. Open WhatsApp. Mute. Volume up. What is my battery.",
   "show_status_overlay": true,
   "show_heard_transcript": true,
   "wake_word_enabled": true,
-  "wake_word": "dora",
+  "wake_word": "hey dora",
+  "wake_phrases": ["hey dora"],
   "wake_prefix_aliases": [],
+  "wake_listen_rms_multiplier": 1.45,
   "announce_ready_at_startup": true,
-  "ready_message": "Dora is ready. Say Dora or hey Dora when you need me.",
+  "ready_message": "Dora is ready. Say hey Dora when you need me.",
   "voice_session_after_wake_sec": 120,
   "voice_processing_grace_sec": 180,
   "voice_idle_timeout_sec": 10,
@@ -54,5 +56,5 @@
   "allow_chat_fallback": true,
   "auto_discover_apps": true,
   "trust_mapped_apps": false,
-  "config_schema_version": 3
+  "config_schema_version": 5
 }

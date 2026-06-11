@@ -43,15 +43,10 @@ class OverlayMixin:
             return
         msg = self._config.ready_message.strip()
         if not msg:
-            msg = "Dora is ready. Say Dora or hey Dora when you need me."
-        if begin_overlay_hidden and not self._overlay_user_hidden:
-            self._overlay.show()
-            self._set_overlay_phase("waiting_wake", msg)
+            msg = "Dora is ready. Say hey Dora when you need me."
         if self._echo_listen_status:
             console_ui.emit(msg, style="green")
         self._tts.speak(msg, cancel_event=self._cancel_event)
-        if begin_overlay_hidden and not self._overlay_user_hidden:
-            self._overlay.hide()
 
     def _overlay_hidden_until_wake(self) -> bool:
         """When True, status window stays off until the wake word opens a session."""
