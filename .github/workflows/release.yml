@@ -34,13 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Build Dora-windows.zip
-        shell: pwsh
-        run: |
-          ./scripts/build-release-zip.ps1
-          if (-not (Test-Path Dora-windows.zip)) {
-            throw "Dora-windows.zip was not created"
-          }
+        run: python scripts/build_release_zip.py
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

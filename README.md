@@ -208,7 +208,7 @@ git push origin v0.2.0
 
 The [Releases](https://github.com/forexlord/dora/releases) page will get a new entry with **`Dora-windows.zip`** attached. Users run **`Install-Dora.bat`** inside the ZIP (no git required).
 
-Manual ZIP (optional): `powershell -ExecutionPolicy Bypass -File scripts/build-release-zip.ps1`
+Manual ZIP (optional): `python scripts/build_release_zip.py`
 
 ---
 
